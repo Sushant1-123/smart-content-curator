@@ -1,0 +1,51 @@
+// Smart Content Curator — data model
+//
+// Design note on caching: `Item.url` / `urlHash` are unique. Saving a URL
+// that's already in the table is treated as a cache hit — we return the
+// existing row instead of re-fetching page metadata or re-calling the AI
+// API. This is the primary cost/latency guard for both external calls.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ItemStatus {
+  PENDING // row created, enrichment in flight (used for optimistic UI)
+  READY   // metadata + AI summary/tags successfully generated
+  PARTIAL // metadata fetched but AI enrichment failed
+  FAILED  // metadata fetch itself failed
+}
+
+model Item {
+  id      String @id @default(cuid())
+  url     String @unique
+  // SHA-256 of the normalized URL. Stored (rather than relying on `url`
+  // equality alone) so lookups are on a fixed-length indexed string even
+  // if `url` normalization rules evolve later.
+  urlHash String @unique
+
+  // --- page metadata (from Open Graph / meta tags) ---
+  title       String?
+  description String?
+  imageUrl    String?
+  siteName    String?
+
+  // --- AI enrichment ---
+  summary String?
+  tags    String[] @default([])
+
+  status       ItemStatus @default(PENDING)
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([tags])
+  @@index([status])
+}
