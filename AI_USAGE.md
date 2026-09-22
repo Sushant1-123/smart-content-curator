@@ -79,6 +79,17 @@ afterward.
   `next.config.mjs`; switched to a plain `<img>` with `unoptimized: true`
   and an `onError` fallback, documented as a deliberate trade-off in the
   README rather than left as an unexplained inconsistency.
+- **`noImplicitOverride` typecheck failure on custom Error subclasses.**
+  `MetadataFetchError` and `AiGenerationError` both declare a `cause`
+  parameter property, but `cause` already exists on the built-in `Error`
+  type (ES2022). With `noImplicitOverride: true` in `tsconfig.json`, that's
+  a compile error (`TS4115`) unless the property is explicitly marked
+  `override`. This wasn't caught during authoring — it only surfaced when
+  `npm run typecheck` / `npm run build` were actually run in a real Node
+  environment, which is exactly the gap called out earlier in this log
+  about not having a live install/build loop while drafting the code. Fixed
+  by adding the `override` modifier in both files once the real build
+  reported it.
 - **Sitemap including everything, not just successfully-enriched items.**
   The first `sitemap.ts` listed every saved `Item` regardless of status.
   Reviewing it against the acceptance criteria, `FAILED`/`PARTIAL` items
