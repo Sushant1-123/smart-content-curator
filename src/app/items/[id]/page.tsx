@@ -5,6 +5,7 @@ import { serializeItem } from "@/lib/serialize";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TagPill } from "@/components/TagPill";
 import { getSiteUrl } from "@/lib/site";
+import { formatSavedDate } from "@/lib/date";
 
 interface PageProps {
   params: { id: string };
@@ -53,7 +54,7 @@ export default async function ItemDetailPage({ params }: PageProps) {
     headline: item.title || item.url,
     description: item.summary || item.description || undefined,
     image: item.imageUrl || undefined,
-    url: item.url,
+    url: `${getSiteUrl()}/items/${item.id}`,
     keywords: item.tags.join(", "),
     datePublished: item.createdAt,
     dateModified: item.updatedAt,
@@ -105,7 +106,7 @@ export default async function ItemDetailPage({ params }: PageProps) {
       )}
 
       <p className="mt-6 text-xs text-slate-400">
-        Saved on {new Date(item.createdAt).toLocaleString()}
+        Saved on <time dateTime={item.createdAt}>{formatSavedDate(item.createdAt)}</time>
       </p>
     </article>
   );

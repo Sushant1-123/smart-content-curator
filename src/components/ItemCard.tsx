@@ -3,6 +3,7 @@
 import type { ItemDto } from "@/types/api";
 import { TagPill } from "./TagPill";
 import { StatusBadge } from "./StatusBadge";
+import { formatSavedDate } from "@/lib/date";
 
 interface ItemCardProps {
   item: ItemDto;
@@ -86,7 +87,7 @@ export function ItemCard({ item, onTagClick, onDelete, onRetry, isBusy }: ItemCa
         )}
 
         <div className="mt-auto flex items-center justify-between pt-2 text-xs text-slate-400">
-          <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+          <time dateTime={item.createdAt}>{formatSavedDate(item.createdAt)}</time>
           <div className="flex items-center gap-3">
             <a href={`/items/${item.id}`} className="font-medium text-slate-500 hover:text-brand-600">
               Details
