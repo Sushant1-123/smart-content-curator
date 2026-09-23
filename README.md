@@ -5,8 +5,8 @@ a short summary and tags — so you can browse and filter your saved reading
 list intelligently. Built for the Hridayangam Technology Full Stack Developer
 technical assessment.
 
-**Live app:** `<add your deployed URL here>`
-**Repo:** `<add your GitHub URL here>`
+**Live app:** `LIVE_APP_URL` (replace before submission)
+**Repo:** `GITHUB_REPO_URL` (replace before submission)
 
 ---
 
@@ -55,7 +55,7 @@ Mapped directly to the assessment's acceptance criteria:
 | Frontend   | Next.js 14 (App Router), React 18, Tailwind CSS      |
 | Backend    | Next.js Route Handlers (`src/app/api/**`)            |
 | Database   | PostgreSQL, via Prisma ORM                           |
-| AI         | Anthropic API (`@anthropic-ai/sdk`)                  |
+| AI         | Google Gemini API (`@google/genai`)                  |
 | Metadata   | `cheerio` (Open Graph / meta tag scraping)           |
 | Validation | Zod (shared client/server contract)                  |
 | Tests      | Vitest                                               |
@@ -82,10 +82,12 @@ src/
   lib/
     prisma.ts                 # Prisma client singleton
     metadata.ts                # page metadata fetch + parse (pure + I/O split)
-    ai.ts                      # Anthropic call + JSON-schema validation + retry
+    ai.ts                      # Gemini call + JSON-schema validation + retry
     enrichItem.ts               # orchestrates: cache check -> metadata -> AI -> persist
     responseCache.ts            # in-memory cache for GET /api/items
-    url.ts                      # URL normalization + hashing (cache keys)
+    rateLimit.ts                # lightweight per-client POST limiter
+    date.ts                     # deterministic UTC date formatting
+    url.ts                      # normalization, hashing, and SSRF policy
     serialize.ts                 # Prisma row -> wire DTO
   types/api.ts                  # Zod schemas + inferred types shared by client & server
 prisma/schema.prisma             # Item model
@@ -94,9 +96,9 @@ tests/lib/                       # unit tests for pure logic
 
 **Separation of concerns:**
 - **Frontend** (`components/*`, client-side `page.tsx` pieces) never talks to
-  Prisma or Anthropic directly — only to `/api/*` via `fetch`.
+  Prisma or Gemini directly — only to `/api/*` via `fetch`.
 - **Backend** (`app/api/**/route.ts`) owns validation, orchestration, and is
-  the only layer that touches Prisma or the Anthropic SDK.
+  the only layer that touches Prisma or the Gemini SDK.
 - **Domain logic** (`lib/enrichItem.ts`, `lib/ai.ts`, `lib/metadata.ts`) is
   factored out of the route handlers so it's independently testable and so
   route handlers stay thin (parse request -> call domain function -> shape
@@ -111,7 +113,7 @@ tests/lib/                       # unit tests for pure logic
    existing row by hash — **cache hit** returns immediately, no external
    calls.
 4. On a cache miss: fetch page metadata (Open Graph tags via `cheerio`) →
-   call the Anthropic API for `{ summary, tags }` → persist one row.
+  call the Gemini API for `{ summary, tags }` → persist one row.
 5. Failures at either step still persist a usable row (`FAILED` if metadata
    fetch failed, `PARTIAL` if only AI enrichment failed) rather than losing
    the user's save — see [Caching strategy](#caching-strategy) and the AI
@@ -123,7 +125,7 @@ tests/lib/                       # unit tests for pure logic
 
 **Prerequisites:** Node.js ≥ 18.18, a PostgreSQL database (local, Docker, or
 a free hosted instance like [Supabase](https://supabase.com) or
-[Neon](https://neon.tech)), and an [Anthropic API key](https://console.anthropic.com/).
+[Neon](https://neon.tech)), and a [Gemini API key](https://aistudio.google.com/apikey).
 
 ```bash
 # 1. Install dependencies
@@ -131,10 +133,13 @@ npm install
 
 # 2. Configure environment variables
 cp .env.example .env
-# then edit .env: set DATABASE_URL and ANTHROPIC_API_KEY
+# then edit .env: set DATABASE_URL and GEMINI_API_KEY
 
-# 3. Create the database schema
-npm run prisma:migrate       # creates the `Item` table (dev migration)
+# 3. Apply the committed initial migration
+npx prisma migrate deploy
+
+# During schema development, create a new migration with:
+npx prisma migrate dev --name init
 
 # 4. (optional) seed a couple of demo items
 npm run db:seed
@@ -166,11 +171,26 @@ npm run build       # production build
 | Variable               | Required | Description                                                             |
 | ----------------------- | -------- | ------------------------------------------------------------------------ |
 | `DATABASE_URL`           | yes      | Postgres connection string (Prisma format)                              |
-| `ANTHROPIC_API_KEY`      | yes      | API key for the Anthropic Messages API                                  |
-| `ANTHROPIC_MODEL`        | no       | Defaults to `claude-3-5-haiku-20241022` (fast/cheap; good for this task) |
+| `GEMINI_API_KEY`         | yes      | Server-side API key for the Google Gemini API                           |
+| `GEMINI_MODEL`           | no       | Defaults to `gemini-3.8-flash`                                          |
 | `NEXT_PUBLIC_SITE_URL`   | no       | Base URL used for sitemap/robots/Open Graph absolute URLs                |
 
 See `.env.example` for a ready-to-copy template.
+
+Never commit `.env` or real API keys. For a Supabase transaction-pooler URL,
+include `?pgbouncer=true` for Prisma compatibility; use a direct Postgres URL
+for migrations when the provider requires it.
+
+## Security and abuse controls
+
+- Only HTTP(S) URLs are accepted. Before each fetch and redirect, the host is
+  checked for localhost, loopback, private IPv4, link-local, IPv6 private,
+  and cloud metadata destinations. DNS results are checked too.
+- Metadata responses are limited to 2 MB, HTML only, and an 8-second timeout.
+- `POST /api/items` allows 10 submissions per minute per client key and returns
+  `429` with `Retry-After` after that. Multi-instance production deployments
+  should replace the in-memory limiter with Redis or Upstash.
+- API clients receive safe messages; internal errors are logged server-side.
 
 ## Caching strategy
 
@@ -234,9 +254,9 @@ and most valuable to unit test without mocking the network or the DB:
 
 I/O-heavy code (`lib/ai.ts`, the route handlers) is intentionally kept thin
 and structured so the parsing/validation/orchestration logic it depends on
-*is* unit-testable, rather than mocking `fetch`/Prisma/Anthropic end-to-end
+*is* unit-testable, rather than mocking `fetch`/Prisma/Gemini end-to-end
 inside a time-boxed assessment. Given more time, I'd add integration tests
-against a test database (e.g. via `testcontainers`) and a mocked Anthropic
+against a test database (e.g. via `testcontainers`) and a mocked Gemini
 client for `lib/ai.ts`'s retry-on-bad-JSON path.
 
 ## Deployment
@@ -251,8 +271,8 @@ Next.js app) + Supabase or Neon (managed Postgres).
    as a Vercel build step — see `vercel.json`-free approach below), i.e. add
    `"vercel-build": "prisma migrate deploy && next build"` as the Vercel
    build command if you want migrations to run automatically on deploy.
-4. Import the repo into Vercel → set `DATABASE_URL`, `ANTHROPIC_API_KEY`,
-   `ANTHROPIC_MODEL` (optional), and `NEXT_PUBLIC_SITE_URL` (your Vercel URL)
+4. Import the repo into Vercel → set `DATABASE_URL`, `GEMINI_API_KEY`,
+   `GEMINI_MODEL` (optional), and `NEXT_PUBLIC_SITE_URL` (your Vercel URL)
    as environment variables.
 5. Deploy. Vercel runs `npm install` → `postinstall` (`prisma generate`) →
    `npm run build`.
@@ -265,7 +285,7 @@ standard Next.js app — no Vercel-specific APIs are used.
 - **One Next.js app instead of a separate Express backend + separate SPA:**
   the assessment explicitly allows "serverless functions... or similar" as
   the backend. Next.js Route Handlers *are* the backend here — they're the
-  only code that touches Prisma/Anthropic, live in their own `api/` tree, and
+  only code that touches Prisma/Gemini, live in their own `api/` tree, and
   are testable/deployable independently of the UI components. This was
   chosen over a separate Express service to avoid duplicating the
   request/response types across two servers and two deploys for an app this
@@ -285,7 +305,7 @@ standard Next.js app — no Vercel-specific APIs are used.
   `store.clear()` with a `DEL` by key pattern or a pub/sub invalidation
   message — the call sites in `app/api/items/route.ts` and
   `lib/enrichItem.ts` wouldn't need to change.
-- **AI failures don't lose the save:** if the Anthropic call fails or returns
+- **AI failures don't lose the save:** if the Gemini call fails or returns
   malformed JSON (after one retry), the item is still persisted with its
   metadata and marked `PARTIAL`, with a "Retry" action in the UI. Losing a
   user's saved link because a summarization call timed out felt like the
@@ -300,4 +320,4 @@ standard Next.js app — no Vercel-specific APIs are used.
 - Pagination/infinite scroll once a user's list grows past a page or two.
 - Multi-user auth (currently single-tenant, matching the "I am a User"
   acceptance criteria as written).
-- Rate limiting on `POST /api/items` to bound Anthropic spend per IP/user.
+- Rate limiting on `POST /api/items` to bound Gemini spend per IP/user.

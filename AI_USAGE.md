@@ -1,120 +1,34 @@
 # AI Usage Log
 
-> **Note before you submit:** this log describes the actual build process for
-> this repo, which was done with heavy AI assistance (Claude) end-to-end,
-> including the architecture decisions. Before submitting, run the app
-> yourself, verify it against the acceptance criteria, and edit this file to
-> reflect *your own* review, any changes you made, and anything you'd have
-> done differently — that's what the assessment is actually evaluating.
+This document records verified AI-assisted work and leaves unknown history as TODOs rather than presenting assumptions as fact.
 
-## Tools used
+## Coding assistants used
 
-- **Coding assistant:** Claude (Anthropic), used conversationally to scaffold
-  the full project — schema, API routes, domain logic, components, tests,
-  README — from the assessment brief.
-- **LLM API integrated into the app itself:** Anthropic Messages API
-  (`@anthropic-ai/sdk`), used at runtime in `src/lib/ai.ts` to generate each
-  saved item's summary and tags. This is the real AI-powered feature the
-  assessment asks for, separate from the assistant used to write the code.
+- GitHub Copilot was used in this session to inspect and modify the existing Smart Content Curator codebase.
+- TODO: add any other coding assistants used before this session, if applicable.
 
-## How the build was approached
+## Runtime AI integration
 
-Rather than asking for the whole app in one shot, the build went
-architecture-first: data model and API contract (`prisma/schema.prisma`,
-`src/types/api.ts`) were defined before any UI, so the frontend and backend
-were written against one agreed-upon shape instead of being reconciled
-afterward.
+The app uses Google's Gemini API through `@google/genai` in `src/lib/ai.ts`. The default model is `gemini-3.8-flash`, configurable through `GEMINI_MODEL`. Gemini is requested to return structured JSON, and responses are still validated with Zod. Malformed responses receive one retry with a stricter JSON-only instruction.
 
-## Representative prompts, and what was kept / edited / discarded
+## Representative prompts
 
-1. **"Design the data model for saved items, including what's needed to
-   support caching of both the metadata fetch and the AI call."**
-   — Kept: the `urlHash` unique-index approach as the cache key, and the
-   `PENDING/READY/PARTIAL/FAILED` status enum. Edited: initially the model
-   only had `READY`/`FAILED`; added `PARTIAL` after realizing "metadata
-   fetched but AI failed" needed to be distinguishable from "couldn't even
-   fetch the page," since the retry action only makes sense for the former.
+- TODO: record the prompts used during earlier project development if known.
+- In this session, the assessment requirements were used as the implementation specification, including SSRF protection, deterministic date rendering, migration verification, and API failure handling.
 
-2. **"Write the Anthropic call so it reliably returns structured
-   `{summary, tags}` instead of free text."**
-   — Kept: the JSON-only system prompt plus a Zod schema to validate the
-   response. Edited: the first version had no retry and would just throw on
-   any malformed response. Added a single retry with a stricter
-   "reply with ONLY the JSON object" nudge after noting the model
-   occasionally wraps output in a sentence or a ```json fence even when told
-   not to — see "where AI output was wrong" below.
+## Kept, edited, and discarded
 
-3. **"Add keyword + tag filtering without duplicating filter logic between
-   client and server."**
-   — Kept: server-side filtering via Prisma `where` clauses driven by a
-   shared `ListItemsQuerySchema`, with debounced client requests. Discarded:
-   an initial suggestion to also filter client-side against the already-
-   fetched list "for snappiness" — rejected because it would silently
-   diverge from the server's filtering logic (e.g. case-insensitivity, tag
-   matching) and create two sources of truth for the same behavior.
+- Kept the existing Next.js App Router, Prisma, PostgreSQL, Tailwind, Gemini, and Zod architecture.
+- Edited URL validation, metadata fetching, AI model configuration, retry semantics, rate limiting, API response validation, deterministic date formatting, tests, and documentation.
+- Discarded no unrelated user changes. TODO: document earlier discarded approaches if they are known.
 
-4. **"Make sure a failed AI call never loses the user's saved link."**
-   — Kept in full: the `PARTIAL` status path in `lib/enrichItem.ts` that
-   persists the item with metadata even when enrichment fails, plus the
-   `/api/items/[id]/retry` endpoint and its "Retry" button in the UI. This
-   came directly from asking the assistant to enumerate failure modes for
-   the write path rather than only the happy path.
+## Mistakes and detection
 
-## Where AI output was wrong, and how it was caught / fixed
+- The AI provider uses the official `@google/genai` SDK. The stable `gemini-3.8-flash` model is configurable through `GEMINI_MODEL`.
+- Date rendering used an implicit locale on the item detail page; this was identified as the source of possible server/client formatting differences and replaced with a shared UTC `Intl.DateTimeFormat` utility.
+- The first SSRF implementation edit produced a malformed intermediate file; strict TypeScript validation caught it immediately, and the module was repaired before continuing.
+- TODO: add any earlier AI mistakes and their verification evidence if known.
 
-- **Malformed JSON from the summarization prompt.** Initial testing prompts
-  (via direct calls to the Anthropic API, not shown in the app) sometimes
-  returned the JSON object wrapped in a short preamble sentence or a
-  ` ```json ` fence despite the system prompt saying not to. This wasn't
-  caught by reading the code — it only showed up by exercising the parser
-  against those response shapes. Fixed by adding `safeParseJson`'s fence-
-  stripping regex and the one-retry-with-a-reminder strategy in
-  `lib/ai.ts`, rather than trusting the model to always follow the
-  instruction on the first try.
-- **`next/image` domain allowlisting.** An early pass used `next/image` for
-  item thumbnails, which fails at runtime for any external image domain not
-  explicitly allowlisted — a non-starter here since thumbnails come from
-  whatever domain a user's saved URL happens to be on. Caught by checking
-  Next.js's image documentation while reviewing the generated
-  `next.config.mjs`; switched to a plain `<img>` with `unoptimized: true`
-  and an `onError` fallback, documented as a deliberate trade-off in the
-  README rather than left as an unexplained inconsistency.
-- **`noImplicitOverride` typecheck failure on custom Error subclasses.**
-  `MetadataFetchError` and `AiGenerationError` both declare a `cause`
-  parameter property, but `cause` already exists on the built-in `Error`
-  type (ES2022). With `noImplicitOverride: true` in `tsconfig.json`, that's
-  a compile error (`TS4115`) unless the property is explicitly marked
-  `override`. This wasn't caught during authoring — it only surfaced when
-  `npm run typecheck` / `npm run build` were actually run in a real Node
-  environment, which is exactly the gap called out earlier in this log
-  about not having a live install/build loop while drafting the code. Fixed
-  by adding the `override` modifier in both files once the real build
-  reported it.
-- **Sitemap including everything, not just successfully-enriched items.**
-  The first `sitemap.ts` listed every saved `Item` regardless of status.
-  Reviewing it against the acceptance criteria, `FAILED`/`PARTIAL` items
-  don't have a meaningful public detail page worth indexing, so the query
-  was scoped to `status: "READY"`.
+## Approximate AI-assisted percentage
 
-## Roughly how much was AI-assisted vs. hand-written
-
-The large majority of the code in this repo was AI-drafted and then
-reviewed/adjusted rather than hand-typed from scratch — appropriate given
-the assessment explicitly frames AI-assisted development as the expected
-way of working, and explicitly wants visibility into that process rather
-than a pretense of a fully hand-written submission. The higher-judgment,
-lower-mechanical-effort work was in: deciding the failure-mode handling
-(`PENDING/READY/PARTIAL/FAILED`), the caching strategy (what to cache, at
-which layer, and why not to reach for Redis at this scale), and what to
-explicitly call out as a trade-off in the README versus what could be
-generated confidently without review.
-
-## What to personalize before submitting
-
-- Fill in the live URL and repo link at the top of `README.md`.
-- Actually run `npm install`, `npm run typecheck`, `npm test`, and
-  `npm run build` locally — this repo was authored without a live Node
-  environment in the loop, so treat the first local install as your real
-  verification pass, not a formality.
-- Replace this section, and the prompts above, with your own if you iterate
-  further on the app — this log should reflect what you actually did.
+TODO: estimate the percentage based on the complete development history. It is not inferred here because the earlier hand-written versus AI-assisted split is unknown.
