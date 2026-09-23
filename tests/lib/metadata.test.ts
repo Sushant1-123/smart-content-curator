@@ -41,4 +41,36 @@ describe("parseHtmlMetadata", () => {
     const result = parseHtmlMetadata(html, "https://example.com/blog/post");
     expect(result.imageUrl).toBe("https://example.com/blog/images/cover.jpg");
   });
+
+  it("extracts readable article content while removing boilerplate", () => {
+    const html = `
+      <html>
+        <head>
+          <title>Example Title</title>
+          <meta name="description" content="Example description" />
+        </head>
+        <body>
+          <nav>Menu</nav>
+          <main>
+            <article>
+              <h1>What the new report says</h1>
+              <p>First paragraph explains the central finding and why it matters.</p>
+              <p>Second paragraph describes the implementation timeline and early reactions.</p>
+            </article>
+          </main>
+          <script>const hidden = "not part of summary";</script>
+          <style>.x { color: red; }</style>
+        </body>
+      </html>
+    `;
+
+    const result = parseHtmlMetadata(html, "https://example.com/post");
+
+    expect(result.title).toBe("Example Title");
+    expect(result.description).toBe("Example description");
+    expect(result.content).toContain("central finding");
+    expect(result.content).toContain("implementation timeline");
+    expect(result.content).not.toContain("Menu");
+    expect(result.content).not.toContain("not part of summary");
+  });
 });

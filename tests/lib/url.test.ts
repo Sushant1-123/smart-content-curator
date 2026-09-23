@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeUrl, hashUrl, isHttpUrl } from "@/lib/url";
+import { normalizeUrl, hashUrl, isHttpUrl, isSafeExternalUrl, isSafeIpAddress } from "@/lib/url";
 
 describe("normalizeUrl", () => {
   it("strips tracking params", () => {
@@ -49,5 +49,20 @@ describe("isHttpUrl", () => {
   it("rejects non-http protocols and garbage", () => {
     expect(isHttpUrl("javascript:alert(1)")).toBe(false);
     expect(isHttpUrl("not a url")).toBe(false);
+  });
+});
+
+describe("SSRF protection", () => {
+  it("rejects local and private destinations", () => {
+    expect(isSafeExternalUrl("http://localhost:3000")).toBe(false);
+    expect(isSafeExternalUrl("http://127.0.0.1")).toBe(false);
+    expect(isSafeExternalUrl("http://192.168.1.10")).toBe(false);
+    expect(isSafeExternalUrl("http://169.254.169.254/latest/meta-data")).toBe(false);
+    expect(isSafeIpAddress("::1")).toBe(false);
+  });
+
+  it("allows a public HTTP(S) destination", () => {
+    expect(isSafeExternalUrl("https://example.com/article")).toBe(true);
+    expect(isSafeExternalUrl("javascript:alert(1)")).toBe(false);
   });
 });

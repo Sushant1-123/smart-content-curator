@@ -60,3 +60,8 @@ export const ApiErrorSchema = z.object({
   }),
 });
 export type ApiError = z.infer<typeof ApiErrorSchema>;
+
+export const RetryItemResponseSchema = z.object({ item: ItemDtoSchema });
+export type RetryItemResponse = z.infer<typeof RetryItemResponseSchema>;
+
+export const DeleteItemResponseSchema = z.object({ deleted: z.literal(true), id: z.string() });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { retryEnrichment } from "@/lib/enrichItem";
+import { retryEnrichment, RetryNotAllowedError } from "@/lib/enrichItem";
 
 /**
  * POST /api/items/:id/retry
@@ -12,7 +12,22 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const item = await retryEnrichment(params.id);
+  let item;
+  try {
+    item = await retryEnrichment(params.id);
+  } catch (error) {
+    if (error instanceof RetryNotAllowedError) {
+      return NextResponse.json(
+        { error: { message: error.message, code: "RETRY_NOT_ALLOWED" } },
+        { status: 400 },
+      );
+    }
+    console.error("POST /api/items/:id/retry failed:", error);
+    return NextResponse.json(
+      { error: { message: "Could not retry enrichment", code: "INTERNAL_ERROR" } },
+      { status: 500 },
+    );
+  }
   if (!item) {
     return NextResponse.json(
       { error: { message: "Item not found", code: "NOT_FOUND" } },

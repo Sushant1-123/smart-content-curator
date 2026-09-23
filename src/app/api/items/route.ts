@@ -13,6 +13,7 @@ import {
   setCachedItemsResponse,
 } from "@/lib/responseCache";
 import type { Prisma } from "@prisma/client";
+import { checkPostRateLimit, getClientKey } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -83,11 +84,18 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/items  { url: string }
  *
- * Fetches page metadata, generates a summary + tags via the Anthropic API,
+ * Fetches page metadata, generates a summary + tags via the Gemini API,
  * and persists the result. Returns the existing row (cached: true) if this
  * URL was already saved, instead of re-doing either external call.
  */
 export async function POST(request: NextRequest) {
+  const rateLimit = checkPostRateLimit(getClientKey(request));
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: { message: "Too many submissions. Please try again later.", code: "RATE_LIMITED" } },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
+    );
+  }
   let body: unknown;
   try {
     body = await request.json();

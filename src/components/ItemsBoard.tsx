@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ItemDto, ListItemsResponse, CreateItemResponse, ApiError } from "@/types/api";
+import {
+  ApiErrorSchema,
+  CreateItemResponseSchema,
+  DeleteItemResponseSchema,
+  ListItemsResponseSchema,
+  RetryItemResponseSchema,
+  type ItemDto,
+} from "@/types/api";
 import { AddItemForm } from "./AddItemForm";
 import { FilterBar } from "./FilterBar";
 import { ItemList } from "./ItemList";
@@ -20,6 +27,7 @@ export function ItemsBoard({ initialItems, initialTags }: ItemsBoardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [listError, setListError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const debouncedQuery = useDebouncedValue(query, 300);
   const isFirstRender = useRef(true);
@@ -38,7 +46,7 @@ export function ItemsBoard({ initialItems, initialTags }: ItemsBoardProps) {
       if (thisRequest !== requestId.current) return; // stale response, ignore
 
       if (!res.ok) throw new Error("Failed to load items");
-      const data = (await res.json()) as ListItemsResponse;
+      const data = ListItemsResponseSchema.parse(await res.json());
       setItems(data.items);
       setTags(data.availableTags);
     } catch {
@@ -66,12 +74,11 @@ export function ItemsBoard({ initialItems, initialTags }: ItemsBoardProps) {
         body: JSON.stringify({ url }),
       });
 
-      const data = (await res.json()) as CreateItemResponse | ApiError;
-
-      if (!res.ok || !("item" in data)) {
-        const message = "error" in data ? data.error.message : "Failed to save item";
-        return { ok: false, message };
+      if (!res.ok) {
+        const error = ApiErrorSchema.parse(await res.json());
+        return { ok: false, message: error.error.message };
       }
+      const data = CreateItemResponseSchema.parse(await res.json());
 
       // Refresh the current view so filters/tags stay consistent with the
       // server (simplest correct approach; the list is small and this
@@ -90,8 +97,10 @@ export function ItemsBoard({ initialItems, initialTags }: ItemsBoardProps) {
     try {
       const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("delete failed");
+      DeleteItemResponseSchema.parse(await res.json());
     } catch {
       setItems(previous); // revert optimistic update
+      setActionError("Couldn't remove that item. Please try again.");
     } finally {
       setBusyIds((current) => {
         const next = new Set(current);
@@ -106,12 +115,17 @@ export function ItemsBoard({ initialItems, initialTags }: ItemsBoardProps) {
     try {
       const res = await fetch(`/api/items/${id}/retry`, { method: "POST" });
       if (res.ok) {
-        const data = (await res.json()) as { item: ItemDto };
+        const data = RetryItemResponseSchema.parse(await res.json());
         setItems((current) => current.map((item) => (item.id === id ? data.item : item)));
         if (data.item.tags.length) {
           setTags((current) => Array.from(new Set([...current, ...data.item.tags])).sort());
         }
+      } else {
+        const error = ApiErrorSchema.parse(await res.json());
+        setActionError(error.error.message);
       }
+    } catch {
+      setActionError("Couldn't retry AI enrichment. Please try again.");
     } finally {
       setBusyIds((current) => {
         const next = new Set(current);
@@ -134,6 +148,11 @@ export function ItemsBoard({ initialItems, initialTags }: ItemsBoardProps) {
       {listError && (
         <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
           {listError}
+        </p>
+      )}
+      {actionError && (
+        <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          {actionError}
         </p>
       )}
       <ItemList
