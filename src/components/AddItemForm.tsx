@@ -64,7 +64,7 @@ export const AddItemForm = forwardRef<HTMLInputElement, AddItemFormProps>(functi
             aria-describedby={error ? "save-url-error" : "save-url-hint"}
           />
         </div>
-        <button type="submit" className="btn-primary h-12 px-5 text-base sm:h-11" disabled={!value.trim()}>
+        <button type="submit" className="btn-primary h-12 px-5 text-base sm:h-11">
           {isSaving ? (
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
           ) : (

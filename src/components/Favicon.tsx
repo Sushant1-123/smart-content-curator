@@ -37,7 +37,7 @@ export function Favicon({ src, hostname, className = "h-4 w-4" }: FaviconProps) 
       loading="lazy"
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
-      className={`${className} shrink-0 rounded-sm object-contain`}
+      className={`${className} shrink-0 rounded-sm object-contain dark:bg-white/90 dark:p-px`}
     />
   );
 }

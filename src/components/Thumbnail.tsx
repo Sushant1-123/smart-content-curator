@@ -24,16 +24,14 @@ export function Thumbnail({ src, hostname, faviconUrl, className = "" }: Thumbna
     return (
       <div
         aria-hidden="true"
-        className={`relative flex items-center justify-center overflow-hidden dark:brightness-[0.85] ${className}`}
-        style={{
-          backgroundImage: `radial-gradient(circle at 20% 20%, hsl(${hue} 70% 70% / 0.55), transparent 55%), radial-gradient(circle at 85% 80%, hsl(${(hue + 50) % 360} 70% 60% / 0.5), transparent 50%), linear-gradient(135deg, hsl(${hue} 35% 92%), hsl(${(hue + 30) % 360} 35% 86%))`,
-        }}
+        className={`thumb-fallback relative flex items-center justify-center overflow-hidden ${className}`}
+        style={{ "--hue": hue } as React.CSSProperties}
       >
         <div className="flex flex-col items-center gap-2">
           <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/90 shadow-sm">
             <Favicon src={faviconUrl} hostname={hostname} className="h-7 w-7" />
           </span>
-          <span className="rounded-full bg-white/80 px-2.5 py-0.5 text-xs font-medium text-stone-700">{hostname}</span>
+          <span className="rounded-full bg-white/80 px-2.5 py-0.5 text-xs font-medium text-stone-700 dark:bg-black/40 dark:text-stone-200">{hostname}</span>
         </div>
       </div>
     );

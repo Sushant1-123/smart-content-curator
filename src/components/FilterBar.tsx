@@ -121,7 +121,10 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function F
       {tags.length > 0 && (
         <div className="flex flex-col gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Filter by tag</h2>
-          <ul className="flex flex-wrap gap-1.5" aria-label="Tags">
+          <ul
+            className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden [&>li]:shrink-0"
+            aria-label="Tags"
+          >
             {visibleTags.map((tag) => (
               <li key={tag.name}>
                 <TagPill
