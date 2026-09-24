@@ -42,6 +42,23 @@ Acceptance criteria:
 - [x] **Persistence:** everything lives in Postgres (Supabase in development), so reloading
       keeps every item.
 
+Pages:
+
+- **`/` (home):** save form, filters, and the **3 newest matching items**. Below them, a
+  **"+N more saved items →"** card opens `/items` with the current search, tags and sort
+  carried over, and a **"📄 Read all N summaries →"** card opens `/summaries`.
+- **`/items`:** the whole library as cards, **15 per page**, with the same search, tag chips
+  (with counts), sort and clear filters, all in the URL (`/items?q=&tags=&sort=&page=`).
+  Changing a filter goes back to page 1. Pagination shows Prev, page numbers (with "…" for long
+  ranges) and Next on tablet/desktop, and a compact "‹ Prev  Page X of Y  Next ›" on phones.
+- **`/summaries`:** a reading view of every full AI summary, newest first, 15 per page, with a
+  search box. Items without a summary show a short "Summary unavailable" note with Retry.
+- **Summary modal:** every card's **Summary** button opens an accessible dialog with the title,
+  source, saved date, full summary, tags and an "Open original post ↗" button. It closes with
+  Esc, a click outside or the close button, keeps focus inside while open, and returns focus to
+  the Summary button. On phones it's a bottom sheet.
+- **`/items/[id]`:** per-item pages stay for SEO and sharing (listed in `sitemap.xml`).
+
 Extras:
 
 - Light, dark and system themes, with no flash of the wrong theme on load.
@@ -104,14 +121,18 @@ Extras:
 ```
 src/
   app/
-    page.tsx                  SSR library page (reads ?q=&tags=&sort=)
+    page.tsx                  SSR home page: 3-item preview (reads ?q=&tags=&sort=)
+    items/page.tsx            all items, 15 per page (reads ?q=&tags=&sort=&page=)
+    summaries/page.tsx        reading view of every summary (reads ?q=&page=)
     items/[id]/page.tsx       per-item detail page with its own metadata
+    error.tsx                 error state for a failed server render
     api/items/route.ts        GET list+filter · POST save+enrich
     api/items/[id]/route.ts   GET one · DELETE
     api/items/[id]/retry/     POST retry (FAILED/PARTIAL) or regenerate (READY)
     api/health/route.ts       DB + AI configuration check
     sitemap.ts robots.ts manifest.ts opengraph-image.tsx icon.svg
-  components/                 UI (ItemsBoard = state owner; cards, filters, toasts, theme)
+  components/                 UI (ItemsBoard / AllItemsBoard / SummariesBoard, cards, SummaryDialog,
+                              Pagination, filters, toasts, theme)
   lib/                        domain + infrastructure (see diagram)
   types/api.ts                the shared API contract (Zod)
 prisma/                       schema + migrations
@@ -179,12 +200,19 @@ All responses are JSON and validated against `src/types/api.ts`. Errors always h
 
 | Method & path                 | Success                                                         | Errors                                              |
 | ----------------------------- | --------------------------------------------------------------- | --------------------------------------------------- |
-| `GET /api/items?q=&tags=a,b&sort=newest\|oldest` | `200 { items, tags: {name,count}[], total }` · `304` if the ETag matches | `400 VALIDATION_ERROR`                     |
+| `GET /api/items?q=&tags=a,b&sort=newest\|oldest&page=1&limit=15` | `200 { items, tags: {name,count}[], total, matched, page, pageSize, pageCount }` · `304` if the ETag matches | `400 VALIDATION_ERROR`                     |
 | `POST /api/items` `{ url }`   | `201 { item, cached:false }` new · `200 { item, cached:true }` already saved | `400 INVALID_JSON / VALIDATION_ERROR / INVALID_URL`, `429 RATE_LIMITED` |
 | `GET /api/items/:id`          | `200 { item }`                                                  | `400`, `404 NOT_FOUND`                              |
 | `DELETE /api/items/:id`       | `200 { deleted:true, id }`                                      | `400`, `404 NOT_FOUND`                              |
 | `POST /api/items/:id/retry`   | `200 { item }`                                                  | `404`, `429`, `502 UPSTREAM_ERROR` (regenerate failed; item unchanged) |
 | `GET /api/health`             | `200 { status, db, gemini }`                                    | `503` if the DB is unreachable                      |
+
+**Pagination:** `page` is 1-based (default 1) and `limit` is 1–100 (default 15). The page is
+loaded in the database (`LIMIT/OFFSET`, ordered by `createdAt` then `id` so pages never
+overlap) alongside a count of the matching rows, so no request loads more than one page. A
+page past the end returns the last page (the response's `page` says which). `total` is the
+whole library; `matched` is the number of items matching the search and tags. Each
+combination of filters, page and limit has its own cache entry and ETag.
 
 Item `status`: `READY` (summarised) · `PARTIAL` (page fetched, AI failed, can retry) ·
 `FAILED` (page unreachable, can retry) · `PENDING` (reserved for async enrichment).
@@ -218,7 +246,7 @@ Item `status`: `READY` (summarised) · `PARTIAL` (page fetched, AI failed, can r
 | **1. URL dedupe** | A saved, `READY` URL returns the existing row immediately. Zero external calls. | `Item.urlHash` (unique) | n/a |
 | **2. External-API cache** | Page metadata and AI output, keyed by SHA-256 of the normalised URL. Survives item deletion, so re-saving a deleted link costs nothing. | `UrlCache` table | Metadata: 7-day TTL. AI output: reused while `promptVersion` matches `PROMPT_VERSION`, so changing the prompt refreshes old summaries lazily. Failures are never cached. |
 | **3. In-flight dedupe** | Concurrent saves of the same URL share one promise. | process memory | when the request settles |
-| **4. API response memo** | `GET /api/items` results per (query, tags, sort). | process memory, 15s TTL | cleared on every write |
+| **4. API response memo** | `GET /api/items` results per (query, tags, sort, page, limit). | process memory, 15s TTL | cleared on every write |
 | **5. HTTP revalidation** | Strong `ETag` + `Cache-Control: private, no-cache`. Unchanged lists return a body-less `304`. | browser | ETag changes with the content |
 
 Layers 1–2 live in Postgres, so they work across serverless instances and restarts. Layers 3–4
@@ -239,10 +267,11 @@ would change to move to Redis.
 ## SEO
 
 - Metadata API: title template, description, keywords, canonical URLs, `robots` rules.
+  `/items` and `/summaries` have their own title, description and canonical URL.
   Items that aren't `READY` are `noindex`.
 - Open Graph and Twitter cards on every page, a generated 1200×630 OG image
   (`opengraph-image.tsx`), and per-item OG tags (title, summary, image, tags) on `/items/[id]`.
-- `sitemap.xml` (home plus every `READY` item), `robots.txt` (disallows `/api/`),
+- `sitemap.xml` (home, `/items`, `/summaries` and every `READY` item), `robots.txt` (disallows `/api/`),
   `manifest.webmanifest`, and an SVG favicon.
 - JSON-LD: `CollectionPage`/`ItemList` on the home page and `Article` on item pages, escaped
   so page titles can't break out of the script tag.
@@ -267,12 +296,14 @@ would change to move to Redis.
 
 ## Testing
 
-`npm test` runs 44 Vitest unit tests over the pure logic that decides correctness:
+`npm test` runs 60 Vitest unit tests over the pure logic that decides correctness:
 
 - URL normalisation and hashing (the cache key), SSRF rules for IPv4/IPv6
 - HTML metadata parsing, fallbacks, charset decoding, non-HTML metadata
 - AI output schema and tag normalisation
 - API contract parsing (query strings, ids, error codes), ETag matching, format helpers
+- Pagination (`lib/pagination.ts`): page count, skip/take, clamping, the "…" page list, the
+  reset to page 1 when filters change, per-page cache keys, and the 3-item home limit
 
 The end-to-end flow (save → summary → filter → reload, duplicates, retry, regenerate, delete,
 PDF, 403 site) was verified manually against Supabase and Gemini. Next steps would be route
@@ -304,5 +335,5 @@ Any Node host (Render, Railway, Fly.io) works the same way; no Vercel-only APIs 
   instant saves.
 - **`<img>` instead of `next/image`:** thumbnails come from arbitrary domains, so a
   `remotePatterns` allowlist isn't possible.
-- **Single-tenant** as specified. Next steps: auth with per-user libraries, pagination beyond
-  500 items, and full-text search (`tsvector`) for relevance ranking.
+- **Single-tenant** as specified. Next steps: auth with per-user libraries, keyset (cursor)
+  pagination for very large libraries, and full-text search (`tsvector`) for relevance ranking.
