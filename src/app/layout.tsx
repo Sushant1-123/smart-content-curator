@@ -75,12 +75,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   Smart<span className="text-accent">Curator</span>
                 </span>
               </Link>
-              <nav aria-label="Primary" className="flex items-center gap-1">
-                <Link href="/" className="btn-ghost hidden sm:inline-flex">
-                  Library
-                </Link>
-                <ThemeToggle />
-              </nav>
+              <ThemeToggle />
             </div>
           </header>
           <main id="main" className="flex-1">
