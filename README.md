@@ -6,8 +6,8 @@ that persists in Postgres.
 
 Built for the Hridayangam Technology full-stack technical assessment.
 
-- **Live app:** Not deployed yet.
-- **Repository:** This project is prepared for the public GitHub repository `smart-content-curator`.
+- **Live app:** https://smart-content-curator.vercel.app
+- **Repository:** https://github.com/Sushant1-123/smart-content-curator
 
 ---
 
@@ -322,15 +322,21 @@ paths.
 
 ## Deployment
 
-Recommended: **Vercel** (the Next.js app: UI plus API routes) and **Supabase** (Postgres).
+Live at **https://smart-content-curator.vercel.app**: **Vercel** (the Next.js app: UI plus
+API routes) and **Supabase** (Postgres). The Vercel project is connected to the GitHub repo,
+so every push to `main` deploys to production.
 
 1. Push the repository to GitHub.
-2. In Supabase, copy the **Transaction pooler** URL (add `?pgbouncer=true`) and the
-   **Session pooler** URL.
+2. In Supabase, copy the **Transaction pooler** URL (port 6543, add `?pgbouncer=true`) and
+   the **Session pooler** URL (port 5432).
 3. Import the repo in Vercel and set `DATABASE_URL`, `DIRECT_URL`, `GEMINI_API_KEY`,
-   `GEMINI_MODEL` (optional) and `NEXT_PUBLIC_SITE_URL` (the production URL).
-4. Set the build command to `prisma migrate deploy && next build` so migrations run on deploy.
-5. Deploy. The save and retry routes declare `maxDuration = 60`, because a page fetch plus
+   `GEMINI_MODEL` / `GEMINI_FALLBACK_MODEL` (optional) and `NEXT_PUBLIC_SITE_URL` (the
+   production URL) for Production and Preview.
+4. `vercel.json` sets the Next.js preset and runs functions in `icn1` (Seoul), next to the
+   Supabase database. `prisma generate` runs from the `postinstall` script.
+5. Migrations are applied separately with `npm run prisma:deploy` (uses `DIRECT_URL`); the
+   build does not touch the database schema.
+6. Deploy. The save and retry routes declare `maxDuration = 60`, because a page fetch plus
    Gemini can take several seconds.
 
 Any Node host (Render, Railway, Fly.io) works the same way; no Vercel-only APIs are used.
