@@ -1,27 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { invalidateItemsCache } from "@/lib/responseCache";
-import { Prisma } from "@prisma/client";
+import { serializeItem } from "@/lib/serialize";
+import { internalError, notFound, validationError } from "@/lib/http";
+import { ItemIdSchema, type DeleteItemResponse, type RetryItemResponse } from "@/types/api";
 
-/** DELETE /api/items/:id — remove a saved item. */
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+interface RouteContext {
+  params: { id: string };
+}
+
+/** GET /api/items/:id — a single saved item. */
+export async function GET(_request: NextRequest, { params }: RouteContext) {
+  const id = ItemIdSchema.safeParse(params.id);
+  if (!id.success) return validationError(id.error);
+
+  const item = await prisma.item.findUnique({ where: { id: id.data } });
+  if (!item) return notFound();
+  const body: RetryItemResponse = { item: serializeItem(item) };
+  return NextResponse.json(body, { headers: { "Cache-Control": "private, no-cache" } });
+}
+
+/**
+ * DELETE /api/items/:id — remove a saved item. The URL's cached metadata and
+ * AI output are kept, so re-saving the same link later costs nothing.
+ */
+export async function DELETE(_request: NextRequest, { params }: RouteContext) {
+  const id = ItemIdSchema.safeParse(params.id);
+  if (!id.success) return validationError(id.error);
+
   try {
-    await prisma.item.delete({ where: { id: params.id } });
-    invalidateItemsCache();
-    return NextResponse.json({ deleted: true, id: params.id });
+    await prisma.item.delete({ where: { id: id.data } });
   } catch (error) {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2025") {
-      return NextResponse.json(
-        { error: { message: "Could not delete item", code: "INTERNAL_ERROR" } },
-        { status: 500 },
-      );
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      return notFound();
     }
-    return NextResponse.json(
-      { error: { message: "Item not found", code: "NOT_FOUND" } },
-      { status: 404 },
-    );
+    console.error("DELETE /api/items/:id failed:", error);
+    return internalError("Couldn't delete this item");
   }
+  invalidateItemsCache();
+  const body: DeleteItemResponse = { deleted: true, id: id.data };
+  return NextResponse.json(body);
 }

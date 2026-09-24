@@ -10,6 +10,7 @@ export function serializeItem(item: Item): ItemDto {
     description: item.description,
     imageUrl: item.imageUrl,
     siteName: item.siteName,
+    faviconUrl: item.faviconUrl,
     summary: item.summary,
     tags: item.tags,
     status: item.status,
