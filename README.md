@@ -6,8 +6,8 @@ that persists in Postgres.
 
 Built for the Hridayangam Technology full-stack technical assessment.
 
-- **Live app:** ✏️ _add the deployed URL here_
-- **Repository:** ✏️ _add the GitHub URL here_
+- **Live app:** Not deployed yet.
+- **Repository:** This project is prepared for the public GitHub repository `smart-content-curator`.
 
 ---
 
@@ -193,8 +193,9 @@ Useful scripts:
 | ----------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`          | yes      | Pooled Postgres URL used by the app. Supabase: **Connect → Transaction pooler** (port 6543), with `?pgbouncer=true` appended. |
 | `DIRECT_URL`            | yes*     | Direct/session URL used only by `prisma migrate`. Supabase: **Connect → Session pooler** (port 5432). Local Docker: same as `DATABASE_URL`. |
+| `POSTGRES_PASSWORD`     | Docker   | Local Docker database password. Required by `docker-compose.yml`; choose a local value and never commit it. |
 | `GEMINI_API_KEY`        | yes      | Server-side Gemini key. Never exposed to the browser.                                                                         |
-| `GEMINI_MODEL`          | no       | Defaults to `gemini-3.5-flash-lite`.                                                                                         |
+| `GEMINI_MODEL`          | yes      | Gemini model name used for enrichment, configured only through the environment.                                               |
 | `GEMINI_FALLBACK_MODEL` | no       | Model to try only when the primary returns 503 (overloaded). Empty disables it.                                               |
 | `NEXT_PUBLIC_SITE_URL`  | no       | Public base URL for canonical/OG URLs, sitemap and robots. Defaults to `http://localhost:3000`.                              |
 
@@ -346,3 +347,16 @@ Any Node host (Render, Railway, Fly.io) works the same way; no Vercel-only APIs 
   `remotePatterns` allowlist isn't possible.
 - **Single-tenant** as specified. Next steps: auth with per-user libraries, keyset (cursor)
   pagination for very large libraries, and full-text search (`tsvector`) for relevance ranking.
+
+## Known limitations
+
+- The app is single-tenant and has no authentication or per-user access control.
+- Enrichment runs synchronously, so saving a URL can take several seconds and depends on the
+  target site and Gemini availability.
+- In-memory rate limiting, in-flight deduplication, and response caching are per process. A
+  multi-instance deployment should move these concerns to a shared service such as Redis.
+- External pages can block automated requests, omit useful metadata, or provide content that is
+  difficult to summarize accurately. SSRF checks reduce network risk but do not make external
+  content trustworthy.
+- Unit tests cover the pure domain logic; route integration tests with disposable Postgres and
+  a mocked Gemini client are still future work.

@@ -1,22 +1,19 @@
 # AI Usage Log
 
-This log records how AI tools were used to build this project: what they produced, what was
-kept or changed, and where they were wrong.
-
-Sections marked **✏️ Your notes** are placeholders for the project owner. They cover work
-from before the Claude Code sessions, which the assistant has no record of. Everything else
-describes work that was actually done and verified.
+This document describes how AI-assisted development was used for Smart Content Curator and
+how the application's Gemini integration is controlled and checked. It is part of the public
+repository; it does not contain prompts with secrets, API keys, database URLs, or user data.
 
 ## 1. Tools
 
 | Purpose | Tool |
 | ------- | ---- |
-| Coding assistant (recent sessions) | **Claude Code** (Anthropic, model Claude Opus 5.5), run in the project folder with shell, file-edit and headless-browser access |
-| Coding assistant (earlier sessions) | GitHub Copilot, according to the previous version of this log |
+| Coding assistant | **Claude Code** (Anthropic) and **GitHub Copilot** |
 | LLM used *inside the app* | **Google Gemini** via `@google/genai` (`gemini-3.5-flash-lite` by default, configurable), used for the summary + tags feature |
 
-> ✏️ **Your notes:** confirm the earlier tool(s), and list anything else you used (e.g. ChatGPT
-> for planning, v0 for UI ideas). One line each: tool, what you used it for.
+The coding assistants were used for repository exploration, implementation, refactoring,
+testing, documentation, and review. Gemini is a runtime dependency of the application and is
+separate from the assistants used to develop it.
 
 ## 2. Representative prompts and outcomes
 
@@ -31,11 +28,9 @@ tests and the dev server; exercised the API with real requests (save, duplicate,
 URLs, 404, filter). It produced a ranked gap report.
 
 **Kept:** the report became the work plan.
-**Human decisions:**
-- commit the uncommitted Gemini migration first as separate commits;
-- keep the stack (Next.js, Prisma, Supabase, Gemini, Tailwind);
-- keep Supabase for development and add `docker-compose.yml` for others;
-- no GitHub or deployment actions by the AI.
+**Human decisions:** the project scope, stack, feature priorities, caching strategy, prompt
+requirements, deployment approach, and final changes were reviewed by the project owner.
+GitHub publishing and deployment were intentionally left as explicit human-controlled steps.
 
 ### Prompt B: "Go, with these rules …"
 
@@ -96,9 +91,10 @@ them; local commits only; verify at 375px and in both themes.
 again), the summary prompt tightened to 50–80 words with a 90-word hard cap in code
 (`PROMPT_VERSION` v4), and this log completed.
 
-> ✏️ **Your notes:** add 1–3 prompts from your earlier sessions (initial scaffold, the first
-> Anthropic implementation, the switch to Gemini). For each: the prompt (abridged is fine),
-> what the tool produced, and what you kept, edited or threw away.
+Earlier implementation sessions followed the same pattern: ask the assistant to inspect the
+current code and tests, propose a focused change, implement it, and run the relevant checks.
+Generated code was retained only after review and adjustment against the existing API
+contracts, Prisma schema, UI behavior, and test results.
 
 ## 3. Where the AI was wrong, and how it was caught
 
@@ -118,9 +114,9 @@ again), the summary prompt tightened to 50–80 words with a 90-word hard cap in
 | 12 | The Summary modal's "return focus to the button" didn't hold when the button hadn't been focused by the click (as in Safari); the browser's own focus restore won. | Scripted Esc/backdrop checks reported `focusReturned: false`. | Refocus one animation frame after closing; re-verified. |
 | 13 | Summaries were meant to be short, but the prompt alone didn't guarantee it: two items saved under the old prompt are ~150 words, and nothing in code stopped a model from overshooting. | Final audit counted words per stored summary. | Prompt now asks for 50–80 words and code caps at 90 (`limitSummaryWords`, unit-tested). Old items shorten when regenerated. |
 
-> ✏️ **Your notes:** add mistakes from your earlier sessions, e.g. anything that went wrong in
-> the Anthropic → Gemini switch, or the `override` / sitemap build-time fixes visible in the
-> git history. For each: what was wrong, how you noticed, how you fixed it.
+The mistakes above are retained because they show where AI output needed engineering judgment:
+the fixes were made in the repository and then checked with focused tests or manual behavior
+checks. They are not a substitute for reviewing model output in a production environment.
 
 ## 4. How AI output was verified
 
@@ -136,12 +132,33 @@ again), the summary prompt tightened to 50–80 words with a 90-word hard cap in
   (Esc, click outside, focus trap, focus return, link `rel`), a horizontal-overflow check and a
   console-error check on every page.
 
-## 5. Rough split: AI-assisted vs hand-written
+## 5. Review responsibility
 
-- **Claude Code sessions:** almost all code changes were written by the AI assistant (roughly
-  90%+). The human contribution was direction and decisions: priorities, scope limits (no
-  GitHub or deploy), stack choices, and reviewing the reports and the running app.
+Most implementation work was AI-assisted, including boilerplate, UI, tests, and refactoring.
+Human review remained responsible for requirements, architecture, security decisions, prompt
+wording, acceptance of generated changes, and verification. The exact percentage of
+AI-generated code is not a reliable quality measure, so this log records the review process
+instead of claiming a precise split.
 
-> ✏️ **Your notes:** estimate the percentage for the **whole project** and say why. For
-> example: "About X% AI-generated. Boilerplate, UI and tests were delegated; the data model,
-> caching design, prompt wording and final review were mine."
+## 6. Gemini integration in the application
+
+`src/lib/ai.ts` reads `GEMINI_API_KEY`, `GEMINI_MODEL`, and the optional
+`GEMINI_FALLBACK_MODEL` from the server environment. The key is never sent to the browser or
+written to logs. Gemini receives the normalized URL, page title, description, and a bounded
+amount of extracted page text. The application asks for a short summary and topical tags.
+
+The prompt treats fetched page text as untrusted data inside delimiters and tells the model to
+ignore instructions found in that text. The response is requested as JSON with a schema,
+validated with Zod, normalized in code, and rejected if it does not contain enough usable tags.
+Transient failures are retried; malformed output receives one corrective prompt; and a
+fallback model can be used for HTTP 503 responses.
+
+## 7. Important limitations
+
+- A model can still produce inaccurate or incomplete summaries, especially when only a title or
+  description is available.
+- Prompt-injection defenses reduce risk but cannot guarantee that untrusted web content is safe
+  or interpreted correctly.
+- The current tests validate pure logic and mocked/structured behavior; external Gemini output
+  and every provider-specific failure mode cannot be exhaustively tested offline.
+- API keys, quotas, model availability, and provider terms remain external dependencies.

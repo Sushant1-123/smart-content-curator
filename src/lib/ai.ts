@@ -17,7 +17,6 @@ export class AiGenerationError extends Error {
  * naturally refreshes stale summaries on the next save/retry.
  */
 export const PROMPT_VERSION = "v4";
-export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 
 export const MIN_TAGS = 3;
 export const MAX_TAGS = 6;
@@ -176,7 +175,12 @@ interface ConfiguredModels {
 }
 
 function getConfiguredModels(): ConfiguredModels {
-  const primary = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+  const primary = process.env.GEMINI_MODEL?.trim();
+  if (!primary) {
+    throw new AiGenerationError(
+      "GEMINI_MODEL is not set. Add it to your .env file (see .env.example).",
+    );
+  }
   const fallback = process.env.GEMINI_FALLBACK_MODEL?.trim() || null;
   return { primary, fallback: fallback === primary ? null : fallback };
 }

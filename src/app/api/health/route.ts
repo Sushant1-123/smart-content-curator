@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { DEFAULT_GEMINI_MODEL, PROMPT_VERSION } from "@/lib/ai";
+import { PROMPT_VERSION } from "@/lib/ai";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ export async function GET() {
       db: "connected",
       gemini: {
         configured: Boolean(process.env.GEMINI_API_KEY),
-        model: process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL,
+        model: process.env.GEMINI_MODEL?.trim() || null,
         promptVersion: PROMPT_VERSION,
         fallbackModel: process.env.GEMINI_FALLBACK_MODEL?.trim() || null,
       },
