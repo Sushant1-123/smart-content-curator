@@ -4,6 +4,9 @@ import { checkPostRateLimit, getClientKey } from "@/lib/rateLimit";
 import { errorResponse, internalError, notFound, validationError } from "@/lib/http";
 import { ItemIdSchema, type RetryItemResponse } from "@/types/api";
 
+// Page fetch (≤8s) + Gemini with retries can exceed the default serverless timeout.
+export const maxDuration = 60;
+
 /**
  * POST /api/items/:id/retry
  *

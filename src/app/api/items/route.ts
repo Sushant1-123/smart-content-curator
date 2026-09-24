@@ -16,6 +16,8 @@ import { checkPostRateLimit, getClientKey } from "@/lib/rateLimit";
 import { errorResponse, internalError, validationError } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
+// Page fetch (≤8s) + Gemini with retries can exceed the default serverless timeout.
+export const maxDuration = 60;
 
 // Browsers/CDNs must revalidate every time (cheap 304 via ETag), and the
 // list is per-library data, so it's never stored in shared caches.
