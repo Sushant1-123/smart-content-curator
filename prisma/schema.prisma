@@ -1,32 +1,36 @@
 // Smart Content Curator — data model
 //
-// Design note on caching: `Item.url` / `urlHash` are unique. Saving a URL
-// that's already in the table is treated as a cache hit — we return the
-// existing row instead of re-fetching page metadata or re-calling the AI
-// API. This is the primary cost/latency guard for both external calls.
+// Two tables with distinct jobs:
+//  - `Item` is the user's library: one row per saved (normalized) URL.
+//  - `UrlCache` is the external-API cache: page metadata and AI output keyed
+//    by the normalized-URL hash. It outlives `Item` rows, so deleting and
+//    re-saving a link (or saving it again after an AI failure) never re-pays
+//    for a page fetch or an LLM call that already succeeded.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Pooled connection (pgbouncer, port 6543 on Supabase) used by the app.
+  url       = env("DATABASE_URL")
+  // Direct/session connection (port 5432) used by `prisma migrate`, which
+  // can't run through a transaction-mode pooler.
+  directUrl = env("DIRECT_URL")
 }
 
 enum ItemStatus {
-  PENDING // row created, enrichment in flight (used for optimistic UI)
+  PENDING // row created, enrichment in flight
   READY   // metadata + AI summary/tags successfully generated
-  PARTIAL // metadata fetched but AI enrichment failed
-  FAILED  // metadata fetch itself failed
+  PARTIAL // metadata fetched but AI enrichment failed (retryable)
+  FAILED  // page could not be fetched (retryable)
 }
 
 model Item {
   id      String @id @default(cuid())
   url     String @unique
-  // SHA-256 of the normalized URL. Stored (rather than relying on `url`
-  // equality alone) so lookups are on a fixed-length indexed string even
-  // if `url` normalization rules evolve later.
+  // SHA-256 of the normalized URL — the key shared with `UrlCache`.
   urlHash String @unique
 
   // --- page metadata (from Open Graph / meta tags) ---
@@ -34,6 +38,7 @@ model Item {
   description String?
   imageUrl    String?
   siteName    String?
+  faviconUrl  String?
 
   // --- AI enrichment ---
   summary String?
@@ -46,6 +51,31 @@ model Item {
   updatedAt DateTime @updatedAt
 
   @@index([createdAt])
-  @@index([tags])
+  @@index([tags], type: Gin)
   @@index([status])
+}
+
+model UrlCache {
+  urlHash String @id
+  url     String
+
+  // --- page metadata cache (refreshed after METADATA_TTL) ---
+  title             String?
+  description       String?
+  imageUrl          String?
+  siteName          String?
+  faviconUrl        String?
+  // Extracted readable text, fed to the LLM. Capped in lib/metadata.ts.
+  content           String?
+  metadataFetchedAt DateTime?
+
+  // --- AI output cache (valid while promptVersion matches) ---
+  summary       String?
+  tags          String[]  @default([])
+  promptVersion String?
+  model         String?
+  aiGeneratedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
