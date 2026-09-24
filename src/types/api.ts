@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PAGE_SIZE } from "@/lib/pagination";
 
 /**
  * Single source of truth for the shape of data crossing the frontend/backend
@@ -55,6 +56,7 @@ export type SortOrder = z.infer<typeof SortSchema>;
 
 export const TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const MAX_FILTER_TAGS = 10;
+export const MAX_PAGE_LIMIT = 100;
 
 const TagSchema = z.string().trim().toLowerCase().max(40).regex(TAG_PATTERN, "Invalid tag");
 
@@ -75,6 +77,9 @@ export const ListItemsQuerySchema = z.object({
     )
     .pipe(z.array(TagSchema).max(MAX_FILTER_TAGS, `Select at most ${MAX_FILTER_TAGS} tags`)),
   sort: SortSchema.optional().default("newest"),
+  /** 1-based page; a page past the end is clamped to the last page by the server. */
+  page: z.coerce.number().int("Page must be a whole number").min(1).max(10_000).optional().default(1),
+  limit: z.coerce.number().int("Limit must be a whole number").min(1).max(MAX_PAGE_LIMIT).optional().default(PAGE_SIZE),
 });
 export type ListItemsQuery = z.output<typeof ListItemsQuerySchema>;
 
@@ -82,11 +87,17 @@ export const TagCountSchema = z.object({ name: z.string(), count: z.number().int
 export type TagCount = z.infer<typeof TagCountSchema>;
 
 export const ListItemsResponseSchema = z.object({
+  /** The requested page of matching items. */
   items: z.array(ItemDtoSchema),
   /** Every tag in the library with its item count (not just the filtered set). */
   tags: z.array(TagCountSchema),
-  /** Total items in the library, so the UI can render "3 of 12". */
+  /** Total items in the library. */
   total: z.number().int(),
+  /** Items matching the search and tags across all pages, so the UI can render "3 of 18". */
+  matched: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  pageCount: z.number().int(),
 });
 export type ListItemsResponse = z.infer<typeof ListItemsResponseSchema>;
 

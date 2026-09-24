@@ -24,10 +24,11 @@ export const maxDuration = 60;
 const LIST_CACHE_CONTROL = "private, no-cache";
 
 /**
- * GET /api/items?q=&tags=a,b&sort=newest|oldest
+ * GET /api/items?q=&tags=a,b&sort=newest|oldest&page=1&limit=15
  *
- * Lists saved items, narrowed by keyword (title/summary/site/URL/tags)
- * and/or tags (AND), plus tag counts for the whole library.
+ * Lists one page of saved items, narrowed by keyword (title/summary/site/
+ * URL/tags) and/or tags (AND), plus the matching count and tag counts for
+ * the whole library.
  */
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
@@ -35,6 +36,8 @@ export async function GET(request: NextRequest) {
     q: params.get("q") ?? undefined,
     tags: params.get("tags") ?? undefined,
     sort: params.get("sort") ?? undefined,
+    page: params.get("page") ?? undefined,
+    limit: params.get("limit") ?? undefined,
   });
   if (!parsed.success) return validationError(parsed.error);
 

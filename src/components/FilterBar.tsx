@@ -1,9 +1,10 @@
 "use client";
 
 import { forwardRef, useState } from "react";
-import { ArrowDownUp, Loader2, Search, X } from "lucide-react";
+import { ArrowDownUp, X } from "lucide-react";
 import type { SortOrder, TagCount } from "@/types/api";
 import { TagPill } from "./TagPill";
+import { SearchField } from "./SearchField";
 
 const COLLAPSED_TAG_COUNT = 14;
 
@@ -16,7 +17,9 @@ interface FilterBarProps {
   activeTags: readonly string[];
   onTagToggle: (tag: string) => void;
   onClear: () => void;
+  /** Items rendered right now. */
   shownCount: number;
+  /** Items matching the current filters, across all pages. */
   totalCount: number;
   isLoading: boolean;
 }
@@ -52,48 +55,15 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function F
   return (
     <section aria-label="Search and filter" className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <label htmlFor="search" className="sr-only">
-            Search saved items
-          </label>
-          <Search
-            className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle"
-            aria-hidden="true"
-          />
-          <input
-            ref={searchRef}
-            id="search"
-            type="search"
-            value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape" && query) {
-                e.preventDefault();
-                onQueryChange("");
-              }
-            }}
-            placeholder="Search titles, summaries and tags"
-            className="input h-11 pl-10 pr-16 text-sm [&::-webkit-search-cancel-button]:hidden"
-            autoComplete="off"
-          />
-          <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-            {isLoading && <Loader2 className="h-4 w-4 animate-spin text-fg-subtle" aria-hidden="true" />}
-            {query ? (
-              <button
-                type="button"
-                onClick={() => onQueryChange("")}
-                className="icon-btn h-7 w-7"
-                aria-label="Clear search"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            ) : (
-              <kbd className="hidden rounded border border-line bg-muted px-1.5 py-0.5 font-sans text-[11px] font-medium text-fg-subtle sm:inline">
-                /
-              </kbd>
-            )}
-          </div>
-        </div>
+        <SearchField
+          ref={searchRef}
+          id="search"
+          label="Search saved items"
+          placeholder="Search titles, summaries and tags"
+          value={query}
+          onChange={onQueryChange}
+          isLoading={isLoading}
+        />
 
         <div className="relative">
           <label htmlFor="sort" className="sr-only">
@@ -121,8 +91,9 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function F
       {tags.length > 0 && (
         <div className="flex flex-col gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Filter by tag</h2>
+          {/* `relative` keeps the chips' absolutely positioned sr-only text inside the scroller. */}
           <ul
-            className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden [&>li]:shrink-0"
+            className="relative -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden [&>li]:shrink-0"
             aria-label="Tags"
           >
             {visibleTags.map((tag) => (
@@ -154,7 +125,7 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function F
 
       <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
         <p className="text-sm text-fg-muted" aria-live="polite" aria-atomic="true">
-          {hasFilters ? (
+          {hasFilters || shownCount < totalCount ? (
             <>
               Showing <strong className="font-semibold text-fg">{shownCount}</strong> of {totalCount}{" "}
               {totalCount === 1 ? "item" : "items"}

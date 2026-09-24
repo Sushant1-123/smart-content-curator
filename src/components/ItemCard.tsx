@@ -1,13 +1,11 @@
 "use client";
 
-import Link from "next/link";
-import { AlertTriangle, ArrowUpRight, Loader2, RefreshCw, Sparkles, Trash2, WifiOff } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, FileText, Loader2, RefreshCw, Sparkles, Trash2, WifiOff } from "lucide-react";
 import type { ItemDto } from "@/types/api";
 import { displayHostname } from "@/lib/format";
-import { formatShortDate } from "@/lib/date";
-import { Favicon } from "./Favicon";
 import { Thumbnail } from "./Thumbnail";
 import { TagPill } from "./TagPill";
+import { ItemMeta } from "./SummaryParts";
 
 interface ItemCardProps {
   item: ItemDto;
@@ -17,9 +15,20 @@ interface ItemCardProps {
   onTagToggle: (tag: string) => void;
   onDelete: (item: ItemDto) => void;
   onRetry: (item: ItemDto) => void;
+  /** Opens the Summary modal; `trigger` gets focus back when it closes. */
+  onOpenSummary: (item: ItemDto, trigger: HTMLElement) => void;
 }
 
-export function ItemCard({ item, activeTags, busy, highlighted, onTagToggle, onDelete, onRetry }: ItemCardProps) {
+export function ItemCard({
+  item,
+  activeTags,
+  busy,
+  highlighted,
+  onTagToggle,
+  onDelete,
+  onRetry,
+  onOpenSummary,
+}: ItemCardProps) {
   const hostname = displayHostname(item.url);
   const title = item.title || hostname;
   const titleId = `item-title-${item.id}`;
@@ -42,14 +51,7 @@ export function ItemCard({ item, activeTags, busy, highlighted, onTagToggle, onD
       </a>
 
       <div className="flex flex-1 flex-col gap-3 p-4 sm:p-5">
-        <div className="flex items-center gap-2 text-xs text-fg-subtle">
-          <Favicon src={item.faviconUrl} hostname={hostname} />
-          <span className="truncate font-medium text-fg-muted">{item.siteName || hostname}</span>
-          <span aria-hidden="true">·</span>
-          <time dateTime={item.createdAt} className="shrink-0" title={`Saved ${formatShortDate(item.createdAt)}`}>
-            {formatShortDate(item.createdAt)}
-          </time>
-        </div>
+        <ItemMeta item={item} />
 
         <h3 id={titleId} className="font-display text-lg font-semibold leading-snug tracking-tight text-fg">
           <a
@@ -118,9 +120,15 @@ export function ItemCard({ item, activeTags, busy, highlighted, onTagToggle, onD
             <span className="sr-only">{title} (opens in a new tab)</span>
           </a>
           <div className="flex items-center">
-            <Link href={`/items/${item.id}`} className="btn-ghost px-2 py-1.5 text-xs">
-              Details<span className="sr-only"> for {title}</span>
-            </Link>
+            <button
+              type="button"
+              onClick={(event) => onOpenSummary(item, event.currentTarget)}
+              className="btn-ghost px-2 py-1.5 text-xs"
+              aria-haspopup="dialog"
+            >
+              <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+              Summary<span className="sr-only"> of {title}</span>
+            </button>
             {item.status === "READY" && (
               <button
                 type="button"

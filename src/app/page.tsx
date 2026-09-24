@@ -1,27 +1,15 @@
 import { ItemsBoard } from "@/components/ItemsBoard";
 import { listItems } from "@/lib/itemQueries";
 import { getSiteUrl, jsonLdString, SITE_NAME, SITE_DESCRIPTION } from "@/lib/site";
-import { ListItemsQuerySchema } from "@/types/api";
+import { HOME_FETCH_LIMIT } from "@/lib/pagination";
+import { parseListQuery, type PageSearchParams } from "@/lib/searchParams";
 
 // Rendered per request so a reload always reflects the database.
 export const dynamic = "force-dynamic";
 
-interface HomePageProps {
-  searchParams: Record<string, string | string[] | undefined>;
-}
-
-function first(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-export default async function HomePage({ searchParams }: HomePageProps) {
-  // Same schema as GET /api/items; invalid params fall back to defaults.
-  const parsed = ListItemsQuerySchema.safeParse({
-    q: first(searchParams.q),
-    tags: first(searchParams.tags),
-    sort: first(searchParams.sort),
-  });
-  const query = parsed.success ? parsed.data : ListItemsQuerySchema.parse({});
+export default async function HomePage({ searchParams }: { searchParams: PageSearchParams }) {
+  // The home page is a preview: always the first rows, whatever ?page= says.
+  const query = { ...parseListQuery(searchParams, HOME_FETCH_LIMIT), page: 1 };
   const data = await listItems(query);
 
   const jsonLd = {
@@ -33,7 +21,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     mainEntity: {
       "@type": "ItemList",
       numberOfItems: data.total,
-      itemListElement: data.items.slice(0, 20).map((item, index) => ({
+      itemListElement: data.items.map((item, index) => ({
         "@type": "ListItem",
         position: index + 1,
         url: `${getSiteUrl()}/items/${item.id}`,
@@ -61,7 +49,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           </header>
           <ItemsBoard
             initialData={data}
-            initialParams={{ q: query.q, tags: query.tags, sort: query.sort }}
+            initialParams={query}
           />
         </div>
       </div>

@@ -21,12 +21,12 @@ describe("CreateItemRequestSchema", () => {
 
 describe("ListItemsQuerySchema", () => {
   it("defaults every filter when omitted", () => {
-    expect(ListItemsQuerySchema.parse({})).toEqual({ q: "", tags: [], sort: "newest" });
+    expect(ListItemsQuerySchema.parse({})).toEqual({ q: "", tags: [], sort: "newest", page: 1, limit: 15 });
   });
 
   it("parses comma-separated tags, lowercased and deduplicated", () => {
     const result = ListItemsQuerySchema.parse({ q: " react ", tags: "Frontend, react,frontend", sort: "oldest" });
-    expect(result).toEqual({ q: "react", tags: ["frontend", "react"], sort: "oldest" });
+    expect(result).toMatchObject({ q: "react", tags: ["frontend", "react"], sort: "oldest" });
   });
 
   it("rejects malformed tags and unknown sort orders", () => {

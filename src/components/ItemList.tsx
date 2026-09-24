@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { BookmarkPlus, SearchX, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, BookmarkPlus, SearchX, Sparkles } from "lucide-react";
 import type { ItemDto } from "@/types/api";
 import { displayHostname } from "@/lib/format";
 import { ItemCard } from "./ItemCard";
+import { SummaryDialog } from "./SummaryDialog";
 
 export interface PendingSave {
   key: string;
@@ -24,7 +26,8 @@ interface ItemListProps {
   onDelete: (item: ItemDto) => void;
   onRetry: (item: ItemDto) => void;
   onClearFilters: () => void;
-  onTryExample: (url: string) => void;
+  /** Home only: example links for an empty library. Elsewhere the empty state links home. */
+  onTryExample?: (url: string) => void;
 }
 
 const EXAMPLE_LINKS = [
@@ -35,6 +38,10 @@ const EXAMPLE_LINKS = [
 
 export function ItemList(props: ItemListProps) {
   const { items, pending, hasFilters, libraryEmpty } = props;
+  const [summaryId, setSummaryId] = useState<string | null>(null);
+  const summaryTrigger = useRef<HTMLElement | null>(null);
+  // Looked up by id so a retry/regenerate shows up in an open modal; a deleted item closes it.
+  const summaryItem = (summaryId && items.find((item) => item.id === summaryId)) || null;
 
   if (items.length === 0 && pending.length === 0) {
     return libraryEmpty ? (
@@ -44,27 +51,42 @@ export function ItemList(props: ItemListProps) {
     ) : null;
   }
 
+  function openSummary(item: ItemDto, trigger: HTMLElement) {
+    summaryTrigger.current = trigger;
+    setSummaryId(item.id);
+  }
+
   return (
-    <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-label="Saved items">
-      {pending.map((p) => (
-        <li key={p.key}>
-          <PendingCard save={p} />
-        </li>
-      ))}
-      {items.map((item) => (
-        <li key={item.id}>
-          <ItemCard
-            item={item}
-            activeTags={props.activeTags}
-            busy={props.busyIds.has(item.id)}
-            highlighted={props.highlightId === item.id}
-            onTagToggle={props.onTagToggle}
-            onDelete={props.onDelete}
-            onRetry={props.onRetry}
-          />
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-label="Saved items">
+        {pending.map((p) => (
+          <li key={p.key}>
+            <PendingCard save={p} />
+          </li>
+        ))}
+        {items.map((item) => (
+          <li key={item.id}>
+            <ItemCard
+              item={item}
+              activeTags={props.activeTags}
+              busy={props.busyIds.has(item.id)}
+              highlighted={props.highlightId === item.id}
+              onTagToggle={props.onTagToggle}
+              onDelete={props.onDelete}
+              onRetry={props.onRetry}
+              onOpenSummary={openSummary}
+            />
+          </li>
+        ))}
+      </ul>
+      <SummaryDialog
+        item={summaryItem}
+        busy={summaryItem ? props.busyIds.has(summaryItem.id) : false}
+        onRetry={props.onRetry}
+        onClose={() => setSummaryId(null)}
+        returnFocusRef={summaryTrigger}
+      />
+    </>
   );
 }
 
@@ -131,7 +153,7 @@ function Shimmer() {
   );
 }
 
-function EmptyLibrary({ onTryExample }: { onTryExample: (url: string) => void }) {
+function EmptyLibrary({ onTryExample }: { onTryExample?: (url: string) => void }) {
   return (
     <div className="card flex flex-col items-center px-6 py-14 text-center sm:py-20">
       <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-soft text-accent-soft-fg">
@@ -139,33 +161,49 @@ function EmptyLibrary({ onTryExample }: { onTryExample: (url: string) => void })
       </span>
       <h2 className="mt-5 font-display text-2xl font-semibold tracking-tight">Your library is empty</h2>
       <p className="mt-2 max-w-md text-fg-muted">
-        Paste any article or page above. Each link gets a short AI summary and topic tags, so it&apos;s easy to find
-        again.
+        {onTryExample ? "Paste any article or page above." : "Save any article or page from the home page."} Each link
+        gets a short AI summary and topic tags, so it&apos;s easy to find again.
       </p>
-      <div className="mt-6 flex flex-col items-center gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Or try one of these</p>
-        <ul className="flex flex-wrap justify-center gap-2">
-          {EXAMPLE_LINKS.map((url) => (
-            <li key={url}>
-              <button type="button" onClick={() => onTryExample(url)} className="btn-secondary text-sm">
-                {displayHostname(url)}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+      {onTryExample ? (
+        <div className="mt-6 flex flex-col items-center gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Or try one of these</p>
+          <ul className="flex flex-wrap justify-center gap-2">
+            {EXAMPLE_LINKS.map((url) => (
+              <li key={url}>
+                <button type="button" onClick={() => onTryExample(url)} className="btn-secondary text-sm">
+                  {displayHostname(url)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <Link href="/" className="btn-primary mt-6">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Save your first link
+        </Link>
+      )}
     </div>
   );
 }
 
-function NoResults({ onClear }: { onClear: () => void }) {
+export function NoResults({
+  onClear,
+  title = "No items match these filters",
+  hint = "Try a different keyword, or remove a tag.",
+  clearLabel = "Clear filters",
+}: {
+  onClear: () => void;
+  title?: string;
+  hint?: string;
+  clearLabel?: string;
+}) {
   return (
     <div className="flex flex-col items-center rounded-2xl border border-dashed border-line-strong px-6 py-14 text-center">
       <SearchX className="h-10 w-10 text-fg-subtle" aria-hidden="true" />
-      <h2 className="mt-4 text-lg font-semibold">No items match these filters</h2>
-      <p className="mt-1 text-sm text-fg-muted">Try a different keyword, or remove a tag.</p>
+      <h2 className="mt-4 text-lg font-semibold">{title}</h2>
+      <p className="mt-1 text-sm text-fg-muted">{hint}</p>
       <button type="button" onClick={onClear} className="btn-secondary mt-5">
-        Clear filters
+        {clearLabel}
       </button>
     </div>
   );

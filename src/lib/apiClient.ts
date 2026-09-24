@@ -57,21 +57,24 @@ export interface ListParams {
   q: string;
   tags: readonly string[];
   sort: SortOrder;
+  page: number;
 }
 
-/** Builds the query string shared by the API and the page URL. */
-export function buildListSearchParams({ q, tags, sort }: ListParams): URLSearchParams {
+/** Builds the query string shared by the API and the page URL (defaults are left out). */
+export function buildListSearchParams({ q, tags, sort, page }: ListParams): URLSearchParams {
   const params = new URLSearchParams();
   if (q.trim()) params.set("q", q.trim());
   if (tags.length) params.set("tags", tags.join(","));
   if (sort !== "newest") params.set("sort", sort);
+  if (page > 1) params.set("page", String(page));
   return params;
 }
 
 export const api = {
-  listItems(params: ListParams, signal?: AbortSignal): Promise<ListItemsResponse> {
-    const qs = buildListSearchParams(params).toString();
-    return request(ListItemsResponseSchema, `/api/items${qs ? `?${qs}` : ""}`, { signal });
+  listItems(params: ListParams, limit: number, signal?: AbortSignal): Promise<ListItemsResponse> {
+    const qs = buildListSearchParams(params);
+    qs.set("limit", String(limit));
+    return request(ListItemsResponseSchema, `/api/items?${qs}`, { signal });
   },
 
   createItem(body: CreateItemRequest): Promise<CreateItemResponse> {

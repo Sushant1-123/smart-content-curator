@@ -51,7 +51,7 @@ export function invalidateItemsCache(): void {
 }
 
 export function buildItemsCacheKey(query: ListItemsQuery): string {
-  return JSON.stringify([query.q.toLowerCase(), [...query.tags].sort(), query.sort]);
+  return JSON.stringify([query.q.toLowerCase(), [...query.tags].sort(), query.sort, query.page, query.limit]);
 }
 
 export function computeEtag(body: unknown): string {
