@@ -15,7 +15,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "db:up": "docker compose up -d"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",

@@ -1,0 +1,25 @@
+# Local Postgres for development: `docker compose up -d`
+# Then set in .env:
+#   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/smart_content_curator"
+#   DIRECT_URL="postgresql://postgres:postgres@localhost:5432/smart_content_curator"
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: scc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: smart_content_curator
+    ports:
+      - "5432:5432"
+    volumes:
+      - scc-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d smart_content_curator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  scc-pgdata:
