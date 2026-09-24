@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { EnrichmentResultSchema } from "@/lib/ai";
+import { EnrichmentResultSchema, MAX_TAGS, normalizeTags } from "@/lib/ai";
 
 describe("AI output contract", () => {
-  it("accepts detailed summaries with four to eight relevant tags", () => {
+  it("accepts a short summary with a handful of tags", () => {
     const summary =
-      "The article explains how the new policy changes the operating model for teams handling sensitive data. It outlines the broader market context, describes the technical safeguards being introduced, and notes how regulators are responding to the rollout. The report also examines costs, implementation timelines, and the political debate around the proposal, while distinguishing the government position from independent analyses and affected stakeholders. The result is a practical overview of why the change matters and what it could mean for compliance, adoption, and future governance decisions.";
-
+      "PostgreSQL 17 adds incremental backups and faster vacuuming, cutting maintenance windows for large clusters. The release also improves JSON handling.";
     expect(
-      EnrichmentResultSchema.safeParse({
-        summary,
-        tags: ["data-governance", "privacy-policy", "regulation", "technology", "compliance"],
-      }).success,
+      EnrichmentResultSchema.safeParse({ summary, tags: ["postgres", "databases", "backups"] }).success,
     ).toBe(true);
   });
 
@@ -20,5 +16,25 @@ describe("AI output contract", () => {
     expect(
       EnrichmentResultSchema.safeParse({ summary: "This is too short.", tags: ["one", "two", "three"] }).success,
     ).toBe(false);
+    expect(EnrichmentResultSchema.safeParse(null).success).toBe(false);
+  });
+});
+
+describe("normalizeTags", () => {
+  it("lowercases, kebab-cases and strips hashes/punctuation", () => {
+    expect(normalizeTags(["#Machine Learning", "Node.js", "  Climate_Policy "])).toEqual([
+      "machine-learning",
+      "node-js",
+      "climate-policy",
+    ]);
+  });
+
+  it("removes accents, duplicates and generic filler tags", () => {
+    expect(normalizeTags(["Café", "cafe", "news", "Article", "postgres"])).toEqual(["cafe", "postgres"]);
+  });
+
+  it("caps the number of tags", () => {
+    const many = Array.from({ length: 12 }, (_, i) => `topic-${i}`);
+    expect(normalizeTags(many)).toHaveLength(MAX_TAGS);
   });
 });
