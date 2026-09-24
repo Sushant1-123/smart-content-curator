@@ -81,7 +81,7 @@ export async function fetchPageMetadata(url: string): Promise<PageMetadata> {
       const isHtml = contentType.includes("text/html") || contentType.includes("xhtml");
       if (!isHtml) {
         await response.body?.cancel().catch(() => undefined);
-        return metadataFromUrl(currentUrl);
+        return metadataFromUrl(currentUrl, contentType);
       }
 
       const bytes = await readCapped(response);
@@ -157,25 +157,44 @@ export function decodeHtml(bytes: Uint8Array, contentType: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-/** Metadata for resources we can't parse (PDFs, images): derived from the URL. */
-export function metadataFromUrl(pageUrl: string): PageMetadata {
+const RESOURCE_LABELS: Record<string, string> = {
+  "application/pdf": "PDF document",
+  "image/": "Image",
+  "video/": "Video",
+  "audio/": "Audio file",
+  "application/json": "JSON data",
+  "text/plain": "Plain-text file",
+};
+
+/**
+ * Metadata for resources we can't parse (PDFs, images, …), derived from the
+ * URL. The description names the resource type so the AI prompt (and the
+ * card) are honest that no page text was available.
+ */
+export function metadataFromUrl(pageUrl: string, contentType = ""): PageMetadata {
   const url = new URL(pageUrl);
+  const hostname = url.hostname.replace(/^www./, "");
+  const label = Object.entries(RESOURCE_LABELS).find(([prefix]) => contentType.startsWith(prefix))?.[1];
   return {
     title: titleFromPath(url.pathname),
-    description: null,
+    description: label ? `${label} hosted on ${hostname}` : null,
     imageUrl: null,
-    siteName: url.hostname.replace(/^www\./, ""),
+    siteName: hostname,
     faviconUrl: `${url.origin}/favicon.ico`,
     content: null,
   };
 }
 
+const FILE_EXTENSION = /.(pdf|html?|php|aspx?|jsp|md|txt|json|xml|jpe?g|png|gif|webp|svg|mp[34]|webm)$/i;
+
 function titleFromPath(pathname: string): string | null {
-  const last = decodeURIComponent(pathname.split("/").filter(Boolean).pop() ?? "");
-  const words = last
-    .replace(/\.[a-z0-9]{1,5}$/i, "")
-    .replace(/[-_+]+/g, " ")
-    .trim();
+  let last = pathname.split("/").filter(Boolean).pop() ?? "";
+  try {
+    last = decodeURIComponent(last);
+  } catch {
+    // Malformed %-escape: keep the raw segment.
+  }
+  const words = last.replace(FILE_EXTENSION, "").replace(/[-_+]+/g, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : null;
 }
 

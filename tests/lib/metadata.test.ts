@@ -97,14 +97,21 @@ describe("metadata fallbacks", () => {
   });
 
   it("derives metadata for non-HTML resources from the URL", () => {
-    expect(metadataFromUrl("https://www.example.com/papers/attention_is_all_you_need.pdf")).toEqual({
+    expect(metadataFromUrl("https://www.example.com/papers/attention_is_all_you_need.pdf", "application/pdf")).toEqual({
       title: "Attention is all you need",
-      description: null,
+      description: "PDF document hosted on example.com",
       imageUrl: null,
       siteName: "example.com",
       faviconUrl: "https://www.example.com/favicon.ico",
       content: null,
     });
+  });
+});
+
+describe("titleFromPath edge cases", () => {
+  it("keeps dotted identifiers and survives malformed escapes", () => {
+    expect(metadataFromUrl("https://arxiv.org/pdf/1706.03762").title).toBe("1706.03762");
+    expect(metadataFromUrl("https://example.com/bad%E0%A4%A").title).toBe("Bad%E0%A4%A");
   });
 });
 
