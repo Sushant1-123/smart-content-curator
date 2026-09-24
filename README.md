@@ -6,8 +6,8 @@ that persists in Postgres.
 
 Built for the Hridayangam Technology full-stack technical assessment.
 
-- **Live app:** `LIVE_APP_URL` <!-- TODO(owner): replace after deploying -->
-- **Repository:** `GITHUB_REPO_URL` <!-- TODO(owner): replace after pushing -->
+- **Live app:** ✏️ _add the deployed URL here_
+- **Repository:** ✏️ _add the GitHub URL here_
 
 ---
 
@@ -150,21 +150,30 @@ npm install
 
 # 2. Configure environment
 cp .env.example .env        # then fill in the values (see the table below)
+                            # DATABASE_URL, DIRECT_URL and GEMINI_API_KEY are required
 
 # 3. Database: pick one
 #    a) Supabase/Neon: paste its URLs into .env
 #    b) Local Docker:
 npm run db:up               # docker compose up -d (Postgres 16 on :5432)
 
-# 4. Apply migrations
+# 4. Apply migrations (uses DIRECT_URL) and check they're applied
 npx prisma migrate deploy
+npx prisma migrate status   # → "Database schema is up to date!"
 
 # 5. (optional) seed two demo items
 npm run db:seed
 
-# 6. Run
+# 6. Run (one process serves the UI and the API routes)
 npm run dev                 # → http://localhost:3000
+
+# 7. Verify
+npm run check               # typecheck + lint + tests
+curl http://localhost:3000/api/health   # → {"status":"ok","db":"connected",...}
 ```
+
+Pages: `/` (save + 3 newest items), `/items` (all items, paginated), `/summaries` (reading
+view), `/items/[id]` (per-item page).
 
 Useful scripts:
 
@@ -221,7 +230,7 @@ Item `status`: `READY` (summarised) · `PARTIAL` (page fetched, AI failed, can r
 
 `src/lib/ai.ts`:
 
-- **Prompt:** a system instruction asks for a 2–3 sentence (40–80 word) summary and 3–6
+- **Prompt:** a system instruction asks for a 2–3 sentence (50–80 word) summary, hard-capped at 90 words in code, and 3–6
   specific, kebab-case topic tags. It explicitly says not to invent facts when only a title
   is available. The page is passed as delimited, untrusted data inside `<page>` tags, and the
   model is told to ignore any instructions inside it (basic prompt-injection hygiene).
@@ -296,7 +305,7 @@ would change to move to Redis.
 
 ## Testing
 
-`npm test` runs 60 Vitest unit tests over the pure logic that decides correctness:
+`npm test` runs 63 Vitest unit tests over the pure logic that decides correctness:
 
 - URL normalisation and hashing (the cache key), SSRF rules for IPv4/IPv6
 - HTML metadata parsing, fallbacks, charset decoding, non-HTML metadata
