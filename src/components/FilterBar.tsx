@@ -1,56 +1,186 @@
 "use client";
 
+import { forwardRef, useState } from "react";
+import { ArrowDownUp, Loader2, Search, X } from "lucide-react";
+import type { SortOrder, TagCount } from "@/types/api";
 import { TagPill } from "./TagPill";
+
+const COLLAPSED_TAG_COUNT = 14;
 
 interface FilterBarProps {
   query: string;
   onQueryChange: (value: string) => void;
-  tags: string[];
-  activeTag: string | null;
-  onTagSelect: (tag: string | null) => void;
+  sort: SortOrder;
+  onSortChange: (value: SortOrder) => void;
+  tags: TagCount[];
+  activeTags: readonly string[];
+  onTagToggle: (tag: string) => void;
+  onClear: () => void;
+  shownCount: number;
+  totalCount: number;
+  isLoading: boolean;
 }
 
-export function FilterBar({ query, onQueryChange, tags, activeTag, onTagSelect }: FilterBarProps) {
+export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function FilterBar(
+  {
+    query,
+    onQueryChange,
+    sort,
+    onSortChange,
+    tags,
+    activeTags,
+    onTagToggle,
+    onClear,
+    shownCount,
+    totalCount,
+    isLoading,
+  },
+  searchRef,
+) {
+  const [expanded, setExpanded] = useState(false);
+  const hasFilters = query.trim().length > 0 || activeTags.length > 0;
+
+  // Selected tags always stay visible, even when the list is collapsed.
+  const visibleTags = expanded
+    ? tags
+    : [
+        ...tags.filter((t) => activeTags.includes(t.name)),
+        ...tags.filter((t) => !activeTags.includes(t.name)),
+      ].slice(0, Math.max(COLLAPSED_TAG_COUNT, activeTags.length));
+  const hiddenCount = tags.length - visibleTags.length;
+
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-      <label htmlFor="filter-query" className="text-sm font-medium text-slate-700">
-        Filter your saved items
-      </label>
-      <input
-        id="filter-query"
-        type="search"
-        value={query}
-        onChange={(e) => onQueryChange(e.target.value)}
-        placeholder="Search by title, summary, or site…"
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-      />
+    <section aria-label="Search and filter" className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <label htmlFor="search" className="sr-only">
+            Search saved items
+          </label>
+          <Search
+            className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle"
+            aria-hidden="true"
+          />
+          <input
+            ref={searchRef}
+            id="search"
+            type="search"
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query) {
+                e.preventDefault();
+                onQueryChange("");
+              }
+            }}
+            placeholder="Search titles, summaries and tags"
+            className="input h-11 pl-10 pr-16 text-sm [&::-webkit-search-cancel-button]:hidden"
+            autoComplete="off"
+          />
+          <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+            {isLoading && <Loader2 className="h-4 w-4 animate-spin text-fg-subtle" aria-hidden="true" />}
+            {query ? (
+              <button
+                type="button"
+                onClick={() => onQueryChange("")}
+                className="icon-btn h-7 w-7"
+                aria-label="Clear search"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            ) : (
+              <kbd className="hidden rounded border border-line bg-muted px-1.5 py-0.5 font-sans text-[11px] font-medium text-fg-subtle sm:inline">
+                /
+              </kbd>
+            )}
+          </div>
+        </div>
+
+        <div className="relative">
+          <label htmlFor="sort" className="sr-only">
+            Sort order
+          </label>
+          <ArrowDownUp
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle"
+            aria-hidden="true"
+          />
+          <select
+            id="sort"
+            value={sort}
+            onChange={(e) => onSortChange(e.target.value === "oldest" ? "oldest" : "newest")}
+            className="input h-11 w-full cursor-pointer appearance-none pl-9 pr-8 text-sm sm:w-auto"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-fg-subtle" aria-hidden="true">
+            ▾
+          </span>
+        </div>
+      </div>
 
       {tags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-xs font-medium uppercase tracking-wide text-slate-400">
-            Tags:
-          </span>
-          <button
-            type="button"
-            onClick={() => onTagSelect(null)}
-            className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-              activeTag === null
-                ? "bg-brand-600 text-white"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            All
-          </button>
-          {tags.map((tag) => (
-            <TagPill
-              key={tag}
-              tag={tag}
-              active={activeTag === tag}
-              onClick={() => onTagSelect(activeTag === tag ? null : tag)}
-            />
-          ))}
+        <div className="flex flex-col gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Filter by tag</h2>
+          <ul className="flex flex-wrap gap-1.5" aria-label="Tags">
+            {visibleTags.map((tag) => (
+              <li key={tag.name}>
+                <TagPill
+                  tag={tag.name}
+                  count={tag.count}
+                  active={activeTags.includes(tag.name)}
+                  onToggle={onTagToggle}
+                  size="md"
+                />
+              </li>
+            ))}
+            {(hiddenCount > 0 || expanded) && tags.length > COLLAPSED_TAG_COUNT && (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => setExpanded((v) => !v)}
+                  className="btn rounded-full px-3 py-1.5 text-sm text-accent hover:bg-accent-soft"
+                  aria-expanded={expanded}
+                >
+                  {expanded ? "Show fewer" : `+${hiddenCount} more`}
+                </button>
+              </li>
+            )}
+          </ul>
         </div>
       )}
-    </div>
+
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
+        <p className="text-sm text-fg-muted" aria-live="polite" aria-atomic="true">
+          {hasFilters ? (
+            <>
+              Showing <strong className="font-semibold text-fg">{shownCount}</strong> of {totalCount}{" "}
+              {totalCount === 1 ? "item" : "items"}
+              {activeTags.length > 0 && (
+                <>
+                  {" "}
+                  tagged <strong className="font-semibold text-fg">{activeTags.join(" + ")}</strong>
+                </>
+              )}
+              {query.trim() && (
+                <>
+                  {" "}
+                  matching “<strong className="font-semibold text-fg">{query.trim()}</strong>”
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <strong className="font-semibold text-fg">{totalCount}</strong> saved {totalCount === 1 ? "item" : "items"}
+            </>
+          )}
+        </p>
+        {hasFilters && (
+          <button type="button" onClick={onClear} className="btn-ghost py-1.5 text-sm">
+            <X className="h-4 w-4" aria-hidden="true" />
+            Clear filters
+          </button>
+        )}
+      </div>
+    </section>
   );
-}
+});
