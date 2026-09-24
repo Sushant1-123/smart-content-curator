@@ -1,323 +1,308 @@
 # Smart Content Curator
 
-Save a link, and the app fetches its page metadata and uses an LLM to generate
-a short summary and tags — so you can browse and filter your saved reading
-list intelligently. Built for the Hridayangam Technology Full Stack Developer
-technical assessment.
+Save a link. The app fetches the page, asks an LLM (Google Gemini) for a short
+summary and topic tags, and adds it to a searchable, filterable reading list
+that persists in Postgres.
 
-**Live app:** `LIVE_APP_URL` (replace before submission)
-**Repo:** `GITHUB_REPO_URL` (replace before submission)
+Built for the Hridayangam Technology full-stack technical assessment.
+
+- **Live app:** `LIVE_APP_URL` <!-- TODO(owner): replace after deploying -->
+- **Repository:** `GITHUB_REPO_URL` <!-- TODO(owner): replace after pushing -->
 
 ---
 
 ## Contents
 
-- [Feature checklist](#feature-checklist)
+- [Features](#features)
 - [Tech stack](#tech-stack)
 - [Architecture](#architecture)
 - [Local setup](#local-setup)
 - [Environment variables](#environment-variables)
+- [API reference](#api-reference)
+- [The AI feature](#the-ai-feature)
 - [Caching strategy](#caching-strategy)
 - [Type safety](#type-safety)
 - [SEO](#seo)
+- [Security and robustness](#security-and-robustness)
 - [Testing](#testing)
 - [Deployment](#deployment)
-- [Architecture decisions / trade-offs](#architecture-decisions--trade-offs)
-- [Possible next steps](#possible-next-steps)
+- [Trade-offs and next steps](#trade-offs-and-next-steps)
 
----
+## Features
 
-## Feature checklist
+Acceptance criteria:
 
-Mapped directly to the assessment's acceptance criteria:
+- [x] **Library view:** each saved item shows its title, source (favicon + domain), image
+      (with generated artwork when the page has none), AI summary and AI tags.
+- [x] **Save a URL:** the app fetches page metadata, generates a summary and tags with Gemini,
+      and adds the item to the list. A skeleton card with staged progress shows while this runs.
+- [x] **Filter:** keyword search across title, summary, site, URL *and* tags, combined with
+      multi-tag filtering (AND). Server-side SQL, debounced, and reflected in the URL
+      (`/?q=cache&tags=http,networking`) so filtered views can be shared and survive reloads.
+- [x] **Persistence:** everything lives in Postgres (Supabase in development), so reloading
+      keeps every item.
 
-- [x] Home page lists saved items: title, source/image, AI summary, AI tags
-- [x] Submitting a URL fetches page metadata + generates summary/tags via an
-      LLM API, then adds it to the list
-- [x] Keyword search and tag filter narrow the list (server-side, debounced)
-- [x] Items persist in Postgres — reloading the page keeps everything
-- [x] Real backend (Next.js Route Handlers) + real database (Postgres via
-      Prisma) — no mock/local-only data
-- [x] Caching for both external API calls (page metadata fetch, AI call) and
-      the app's own `GET /api/items` responses
-- [x] TypeScript strict mode end-to-end, with a single shared contract
-      (`src/types/api.ts`, Zod) used by both the API routes and the client
-- [x] SEO: per-page metadata, Open Graph/Twitter tags, a **per-item detail
-      page** with its own metadata, `sitemap.xml`, `robots.txt`, JSON-LD
-      structured data, semantic HTML
-- [x] Extras: retry-on-AI-failure, optimistic delete, empty/loading states,
-      URL-level dedupe/normalization, a `/api/health` endpoint, unit tests
+Extras:
+
+- Light, dark and system themes, with no flash of the wrong theme on load.
+- Toasts for every outcome. Delete has a 6-second undo, and a pending delete is still
+  sent if the tab closes during that window.
+- Retry for failed items, and **Regenerate** for finished ones (the current summary is kept
+  if regeneration fails).
+- Sort by newest or oldest, tag counts, a result count ("Showing 2 of 8 items tagged
+  networking"), clear filters, and a `/` shortcut to focus search.
+- Per-item detail pages with their own Open Graph tags and JSON-LD, plus a generated OG image.
+- Duplicate protection: tracking parameters, trailing slashes, host case and fragments are
+  normalised, so the same article is never saved or summarised twice. Concurrent saves of
+  the same URL share one pipeline run.
+- Mobile-first responsive layout, keyboard accessible, `prefers-reduced-motion` aware.
 
 ## Tech stack
 
-| Layer      | Choice                                             |
-| ---------- | --------------------------------------------------- |
-| Frontend   | Next.js 14 (App Router), React 18, Tailwind CSS      |
-| Backend    | Next.js Route Handlers (`src/app/api/**`)            |
-| Database   | PostgreSQL, via Prisma ORM                           |
-| AI         | Google Gemini API (`@google/genai`)                  |
-| Metadata   | `cheerio` (Open Graph / meta tag scraping)           |
-| Validation | Zod (shared client/server contract)                  |
-| Tests      | Vitest                                               |
-
-One codebase, one framework, deployed as a single Vercel project — this is a
-deliberate choice for a small app; see [Architecture decisions](#architecture-decisions--trade-offs)
-for why this still cleanly satisfies "frontend, backend, and DB" as separate
-concerns rather than being a monolith in the bad sense.
+| Layer      | Choice                                                                     |
+| ---------- | -------------------------------------------------------------------------- |
+| Frontend   | Next.js 14 (App Router), React 18, Tailwind CSS, lucide-react icons        |
+| Backend    | Next.js Route Handlers (`src/app/api/**`)                                  |
+| Database   | PostgreSQL via Prisma ORM (Supabase in dev; `docker-compose.yml` for local) |
+| AI         | Google Gemini (`@google/genai`), structured JSON output                     |
+| Scraping   | `cheerio` for Open Graph/meta parsing and readable-text extraction         |
+| Contracts  | Zod schemas shared by server and client                                    |
+| Tests      | Vitest                                                                     |
 
 ## Architecture
 
 ```
-src/
-  app/
-    page.tsx                 # SSR home page (server component, queries Prisma directly)
-    items/[id]/page.tsx       # per-item detail page (SSR + per-item SEO metadata)
-    sitemap.ts / robots.ts    # SEO
-    api/
-      items/route.ts          # GET (list+filter), POST (create+enrich)
-      items/[id]/route.ts      # DELETE
-      items/[id]/retry/route.ts# POST — retry AI enrichment only
-      health/route.ts          # liveness check
-  components/                 # presentational + client-interactive UI
-  lib/
-    prisma.ts                 # Prisma client singleton
-    metadata.ts                # page metadata fetch + parse (pure + I/O split)
-    ai.ts                      # Gemini call + JSON-schema validation + retry
-    enrichItem.ts               # orchestrates: cache check -> metadata -> AI -> persist
-    responseCache.ts            # in-memory cache for GET /api/items
-    rateLimit.ts                # lightweight per-client POST limiter
-    date.ts                     # deterministic UTC date formatting
-    url.ts                      # normalization, hashing, and SSRF policy
-    serialize.ts                 # Prisma row -> wire DTO
-  types/api.ts                  # Zod schemas + inferred types shared by client & server
-prisma/schema.prisma             # Item model
-tests/lib/                       # unit tests for pure logic
+ Browser (React client components)
+   │   typed fetch via lib/apiClient.ts — every response is parsed with the shared Zod schema
+   ▼
+ Next.js Route Handlers  src/app/api/**            ← validation, HTTP status codes, error shape
+   │  GET /api/items ─────► lib/itemQueries.ts      (search / tag filter SQL)
+   │  POST /api/items ────► lib/enrichItem.ts       (orchestration, dedupe, statuses)
+   │                          ├─► lib/urlCache.ts   (DB cache of metadata + AI output)
+   │                          │     ├─► lib/metadata.ts  → the saved web page (SSRF-guarded fetch)
+   │                          │     └─► lib/ai.ts        → Google Gemini API
+   │                          └─► Prisma
+   ▼
+ PostgreSQL:  Item (the library)   UrlCache (external-API cache, keyed by URL hash)
 ```
 
-**Separation of concerns:**
-- **Frontend** (`components/*`, client-side `page.tsx` pieces) never talks to
-  Prisma or Gemini directly — only to `/api/*` via `fetch`.
-- **Backend** (`app/api/**/route.ts`) owns validation, orchestration, and is
-  the only layer that touches Prisma or the Gemini SDK.
-- **Domain logic** (`lib/enrichItem.ts`, `lib/ai.ts`, `lib/metadata.ts`) is
-  factored out of the route handlers so it's independently testable and so
-  route handlers stay thin (parse request -> call domain function -> shape
-  response).
-- **DB access** goes through a single Prisma client singleton; nothing else
-  imports `@prisma/client` directly.
+**Boundaries**
 
-**Data flow for "save a URL":**
-1. Client `POST /api/items` with `{ url }`.
-2. Zod validates the payload.
-3. `enrichItem.saveAndEnrichItem` normalizes the URL and checks for an
-   existing row by hash — **cache hit** returns immediately, no external
-   calls.
-4. On a cache miss: fetch page metadata (Open Graph tags via `cheerio`) →
-  call the Gemini API for `{ summary, tags }` → persist one row.
-5. Failures at either step still persist a usable row (`FAILED` if metadata
-   fetch failed, `PARTIAL` if only AI enrichment failed) rather than losing
-   the user's save — see [Caching strategy](#caching-strategy) and the AI
-   Usage Log for how this was arrived at.
-6. The in-memory list-response cache is invalidated so the next `GET`
-   reflects the new item.
+- **Frontend** (`src/components/*`) never imports Prisma, Gemini or any Node module. It talks
+  only to `/api/*` through `lib/apiClient.ts`. The server-rendered home page calls the same
+  `listItems()` function as `GET /api/items`, so the first render and later client fetches
+  always filter the same way.
+- **Backend route handlers** stay thin: parse and validate the input, call a domain function,
+  and map the result to a status code. All errors share one shape:
+  `{ "error": { "message", "code" } }` (`lib/http.ts`).
+- **Domain logic** (`lib/enrichItem.ts`, `lib/urlCache.ts`, `lib/metadata.ts`, `lib/ai.ts`,
+  `lib/itemQueries.ts`) has no HTTP concerns and is unit-tested where it's pure.
+- **Database:** `Item` is the user's library. `UrlCache` stores what the external APIs returned.
+  They're separate tables, so deleting an item doesn't throw away work that has already been
+  paid for.
+
+```
+src/
+  app/
+    page.tsx                  SSR library page (reads ?q=&tags=&sort=)
+    items/[id]/page.tsx       per-item detail page with its own metadata
+    api/items/route.ts        GET list+filter · POST save+enrich
+    api/items/[id]/route.ts   GET one · DELETE
+    api/items/[id]/retry/     POST retry (FAILED/PARTIAL) or regenerate (READY)
+    api/health/route.ts       DB + AI configuration check
+    sitemap.ts robots.ts manifest.ts opengraph-image.tsx icon.svg
+  components/                 UI (ItemsBoard = state owner; cards, filters, toasts, theme)
+  lib/                        domain + infrastructure (see diagram)
+  types/api.ts                the shared API contract (Zod)
+prisma/                       schema + migrations
+tests/lib/                    Vitest unit tests
+```
 
 ## Local setup
 
-**Prerequisites:** Node.js ≥ 18.18, a PostgreSQL database (local, Docker, or
-a free hosted instance like [Supabase](https://supabase.com) or
-[Neon](https://neon.tech)), and a [Gemini API key](https://aistudio.google.com/apikey).
+**Prerequisites:** Node.js ≥ 18.18, a Postgres database, and a
+[Gemini API key](https://aistudio.google.com/apikey).
 
 ```bash
-# 1. Install dependencies
+# 1. Install dependencies (also runs `prisma generate`)
 npm install
 
-# 2. Configure environment variables
-cp .env.example .env
-# then edit .env: set DATABASE_URL and GEMINI_API_KEY
+# 2. Configure environment
+cp .env.example .env        # then fill in the values (see the table below)
 
-# 3. Apply the committed initial migration
+# 3. Database: pick one
+#    a) Supabase/Neon: paste its URLs into .env
+#    b) Local Docker:
+npm run db:up               # docker compose up -d (Postgres 16 on :5432)
+
+# 4. Apply migrations
 npx prisma migrate deploy
 
-# During schema development, create a new migration with:
-npx prisma migrate dev --name init
-
-# 4. (optional) seed a couple of demo items
+# 5. (optional) seed two demo items
 npm run db:seed
 
-# 5. Run the app
-npm run dev
-# -> http://localhost:3000
+# 6. Run
+npm run dev                 # → http://localhost:3000
 ```
 
-**Quick local Postgres with Docker**, if you don't already have one running:
+Useful scripts:
 
-```bash
-docker run --name scc-postgres -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=smart_content_curator -p 5432:5432 -d postgres:16
-# then: DATABASE_URL="postgresql://postgres:postgres@localhost:5432/smart_content_curator"
-```
-
-Other useful scripts:
-
-```bash
-npm run typecheck   # tsc --noEmit, strict mode
-npm run lint        # eslint (next/core-web-vitals)
-npm test            # vitest — unit tests for lib/url.ts, lib/metadata.ts, types/api.ts
-npm run build       # production build
-```
+| Script                 | What it does                                      |
+| ---------------------- | ------------------------------------------------- |
+| `npm run dev`          | Next.js dev server                                |
+| `npm run check`        | typecheck + lint + tests (all must pass)          |
+| `npm run typecheck`    | `tsc --noEmit` in strict mode                     |
+| `npm run lint`         | ESLint (`next/core-web-vitals`)                   |
+| `npm test`             | Vitest unit tests                                 |
+| `npm run build`        | production build                                  |
+| `npm run prisma:deploy`| apply migrations                                  |
 
 ## Environment variables
 
-| Variable               | Required | Description                                                             |
-| ----------------------- | -------- | ------------------------------------------------------------------------ |
-| `DATABASE_URL`           | yes      | Postgres connection string (Prisma format)                              |
-| `GEMINI_API_KEY`         | yes      | Server-side API key for the Google Gemini API                           |
-| `GEMINI_MODEL`           | no       | Defaults to `gemini-3.8-flash`                                          |
-| `NEXT_PUBLIC_SITE_URL`   | no       | Base URL used for sitemap/robots/Open Graph absolute URLs                |
+| Variable                | Required | Description                                                                                                                  |
+| ----------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`          | yes      | Pooled Postgres URL used by the app. Supabase: **Connect → Transaction pooler** (port 6543), with `?pgbouncer=true` appended. |
+| `DIRECT_URL`            | yes*     | Direct/session URL used only by `prisma migrate`. Supabase: **Connect → Session pooler** (port 5432). Local Docker: same as `DATABASE_URL`. |
+| `GEMINI_API_KEY`        | yes      | Server-side Gemini key. Never exposed to the browser.                                                                         |
+| `GEMINI_MODEL`          | no       | Defaults to `gemini-3.5-flash-lite`.                                                                                         |
+| `GEMINI_FALLBACK_MODEL` | no       | Model to try only when the primary returns 503 (overloaded). Empty disables it.                                               |
+| `NEXT_PUBLIC_SITE_URL`  | no       | Public base URL for canonical/OG URLs, sitemap and robots. Defaults to `http://localhost:3000`.                              |
 
-See `.env.example` for a ready-to-copy template.
+\* The running app doesn't read `DIRECT_URL`; only migrations need it.
 
-Never commit `.env` or real API keys. For a Supabase transaction-pooler URL,
-include `?pgbouncer=true` for Prisma compatibility; use a direct Postgres URL
-for migrations when the provider requires it.
+`.env` and `.env.local` are gitignored. `.env.example` is the template.
 
-## Security and abuse controls
+## API reference
 
-- Only HTTP(S) URLs are accepted. Before each fetch and redirect, the host is
-  checked for localhost, loopback, private IPv4, link-local, IPv6 private,
-  and cloud metadata destinations. DNS results are checked too.
-- Metadata responses are limited to 2 MB, HTML only, and an 8-second timeout.
-- `POST /api/items` allows 10 submissions per minute per client key and returns
-  `429` with `Retry-After` after that. Multi-instance production deployments
-  should replace the in-memory limiter with Redis or Upstash.
-- API clients receive safe messages; internal errors are logged server-side.
+All responses are JSON and validated against `src/types/api.ts`. Errors always have the shape
+`{ "error": { "message": string, "code": ErrorCode } }`.
+
+| Method & path                 | Success                                                         | Errors                                              |
+| ----------------------------- | --------------------------------------------------------------- | --------------------------------------------------- |
+| `GET /api/items?q=&tags=a,b&sort=newest\|oldest` | `200 { items, tags: {name,count}[], total }` · `304` if the ETag matches | `400 VALIDATION_ERROR`                     |
+| `POST /api/items` `{ url }`   | `201 { item, cached:false }` new · `200 { item, cached:true }` already saved | `400 INVALID_JSON / VALIDATION_ERROR / INVALID_URL`, `429 RATE_LIMITED` |
+| `GET /api/items/:id`          | `200 { item }`                                                  | `400`, `404 NOT_FOUND`                              |
+| `DELETE /api/items/:id`       | `200 { deleted:true, id }`                                      | `400`, `404 NOT_FOUND`                              |
+| `POST /api/items/:id/retry`   | `200 { item }`                                                  | `404`, `429`, `502 UPSTREAM_ERROR` (regenerate failed; item unchanged) |
+| `GET /api/health`             | `200 { status, db, gemini }`                                    | `503` if the DB is unreachable                      |
+
+Item `status`: `READY` (summarised) · `PARTIAL` (page fetched, AI failed, can retry) ·
+`FAILED` (page unreachable, can retry) · `PENDING` (reserved for async enrichment).
+
+## The AI feature
+
+`src/lib/ai.ts`:
+
+- **Prompt:** a system instruction asks for a 2–3 sentence (40–80 word) summary and 3–6
+  specific, kebab-case topic tags. It explicitly says not to invent facts when only a title
+  is available. The page is passed as delimited, untrusted data inside `<page>` tags, and the
+  model is told to ignore any instructions inside it (basic prompt-injection hygiene).
+- **Input:** title, meta description and up to 8,000 characters of readable text extracted
+  from `<article>`/`<main>`, with navigation, scripts and footers stripped.
+- **Output:** Gemini's `responseJsonSchema` constrains the shape, and the result is still
+  validated with Zod. Tags are then normalised in code: lowercase, accents stripped,
+  kebab-case, de-duplicated, generic filler (`news`, `article`, …) dropped, capped at 6.
+- **Failures:**
+  - A malformed response gets one corrective re-prompt.
+  - 429/5xx responses are retried with exponential backoff (up to 3 attempts).
+  - A 503 can fail over to `GEMINI_FALLBACK_MODEL`.
+  - If everything fails, the item is saved as `PARTIAL` with the reason and a Retry button;
+    the save itself never fails because of the AI.
+- **Cost:** a flash-lite model, `temperature: 0.2`, `maxOutputTokens: 600`, capped input,
+  and the cache below. In practice a given URL is summarised once.
 
 ## Caching strategy
 
-The assessment explicitly asks for caching of **both** external API
-responses **and** the app's own API responses. Concretely:
+| Layer | What | Where | Invalidation |
+| ----- | ---- | ----- | ------------ |
+| **1. URL dedupe** | A saved, `READY` URL returns the existing row immediately. Zero external calls. | `Item.urlHash` (unique) | n/a |
+| **2. External-API cache** | Page metadata and AI output, keyed by SHA-256 of the normalised URL. Survives item deletion, so re-saving a deleted link costs nothing. | `UrlCache` table | Metadata: 7-day TTL. AI output: reused while `promptVersion` matches `PROMPT_VERSION`, so changing the prompt refreshes old summaries lazily. Failures are never cached. |
+| **3. In-flight dedupe** | Concurrent saves of the same URL share one promise. | process memory | when the request settles |
+| **4. API response memo** | `GET /api/items` results per (query, tags, sort). | process memory, 15s TTL | cleared on every write |
+| **5. HTTP revalidation** | Strong `ETag` + `Cache-Control: private, no-cache`. Unchanged lists return a body-less `304`. | browser | ETag changes with the content |
 
-1. **URL-level cache (avoids redundant metadata fetch + AI calls):**
-   `Item.url` / `Item.urlHash` are unique. Saving a URL that's already in the
-   table returns the existing row (`cached: true` in the response) instead of
-   re-fetching the page or re-calling the AI API. This is the main cost
-   control, since it means metadata fetch + AI generation happen **at most
-   once per distinct URL, ever** — not once per page load. See
-   `lib/enrichItem.ts`.
-2. **In-memory response cache for `GET /api/items`:**
-   `lib/responseCache.ts` memoizes list responses per `(query, tag)` filter
-   combination for a short TTL (15s) and is eagerly invalidated on any
-   write. This cuts duplicate DB round-trips when the list is polled or
-   re-rendered without any actual data change. `Cache-Control` /
-   `X-Cache: HIT|MISS` headers are also set for visibility.
-3. Deliberately **not** using Redis/external cache infra for this: it's a
-   small, single-purpose app, and the in-memory approach is transparent and
-   sufficient. Documented in [Architecture decisions](#architecture-decisions--trade-offs)
-   with the scaling path if this needed to run across many instances.
+Layers 1–2 live in Postgres, so they work across serverless instances and restarts. Layers 3–4
+are per-instance; that's fine at this scale, and `lib/responseCache.ts` is the only file that
+would change to move to Redis.
 
 ## Type safety
 
-- `tsconfig.json` has `"strict": true` plus `noUncheckedIndexedAccess` and
-  `noImplicitOverride` for stricter-than-default checking.
-- `src/types/api.ts` defines Zod schemas for every request/response shape.
-  **Both the API route handlers and the client components import the same
-  schemas/types** — there's exactly one definition of what `POST /api/items`
-  accepts and returns, so a shape change is a compile error on both sides,
-  not a silently-diverging assumption.
-- Prisma generates a fully-typed client from `schema.prisma`; `lib/serialize.ts`
-  is the single seam that turns a typed Prisma row into the wire DTO.
+- `strict: true`, plus `noUncheckedIndexedAccess` and `noImplicitOverride`. There is no `any`
+  in the codebase.
+- `src/types/api.ts` is the single contract: route handlers validate requests with it, and
+  `lib/apiClient.ts` validates every response with it, so a change on either side is a compile
+  error on both.
+- Prisma generates the DB types. `lib/serialize.ts` is the one place a DB row becomes a wire DTO.
+- The raw SQL used for search returns only ids, and rows are then loaded through Prisma, so
+  typed data never comes from an untyped query.
 
 ## SEO
 
-- Per-page `<title>`/`<meta description>` via the Next.js Metadata API
-  (`generateMetadata`), including a title template.
-- Open Graph + Twitter Card tags on the home page and, more specifically, on
-  **each saved item's own detail page** (`/items/[id]`) — so a link shared to
-  Slack/iMessage/X shows that item's real title, summary, and image instead
-  of generic app-shell metadata.
-- `sitemap.xml` (dynamic, includes every successfully-enriched item) and
-  `robots.txt`.
-- JSON-LD structured data: `ItemList` on the home page, `Article` on each
-  item detail page.
-- Semantic HTML (`<header>`, `<main>`, `<nav>`, `<article>`, `<footer>`,
-  labelled landmarks) and accessible form labels/`aria-*` attributes.
+- Metadata API: title template, description, keywords, canonical URLs, `robots` rules.
+  Items that aren't `READY` are `noindex`.
+- Open Graph and Twitter cards on every page, a generated 1200×630 OG image
+  (`opengraph-image.tsx`), and per-item OG tags (title, summary, image, tags) on `/items/[id]`.
+- `sitemap.xml` (home plus every `READY` item), `robots.txt` (disallows `/api/`),
+  `manifest.webmanifest`, and an SVG favicon.
+- JSON-LD: `CollectionPage`/`ItemList` on the home page and `Article` on item pages, escaped
+  so page titles can't break out of the script tag.
+- Semantic landmarks (`header`, `nav`, `main`, `section`, `article`, `footer`), a skip link,
+  one `h1` per page, labelled controls.
+
+## Security and robustness
+
+- **SSRF:** only public `http(s)` URLs are accepted. Every hop, including each redirect, is
+  checked after DNS resolution against loopback, private, link-local, CGNAT, multicast and
+  IPv6 ULA/link-local ranges (including IPv4-mapped IPv6). Single-label, `.local` and
+  `.internal` hosts are rejected.
+- **Fetching:** an 8s timeout covers connect, redirects and body; at most 5 redirects; bodies
+  capped at 2 MB. Charset comes from the header or `<meta charset>`. Non-HTML resources (PDFs,
+  images) are saved with URL-derived metadata instead of being rejected. HTTP errors get
+  human-readable reasons (e.g. "HTTP 403: the site blocked automated access").
+- **Metadata fallbacks:** title from og → twitter → `<title>` → `<h1>` → URL slug; image from
+  og/twitter/`image_src`/itemprop; favicon from `<link rel=icon>` or `/favicon.ico`.
+- **Abuse:** `POST` and retry are rate-limited to 10 per minute per client IP (in-memory;
+  use Upstash/Redis for multiple instances).
+- API keys stay on the server; raw internal errors are logged, never returned.
 
 ## Testing
 
-`npm test` runs Vitest against the pure/deterministic logic that's cheapest
-and most valuable to unit test without mocking the network or the DB:
+`npm test` runs 44 Vitest unit tests over the pure logic that decides correctness:
 
-- `lib/url.ts` — URL normalization and hashing (the basis of the cache key)
-- `lib/metadata.ts` — HTML → Open Graph metadata parsing, including the
-  relative-image-URL and missing-tag fallback cases
-- `types/api.ts` — the Zod request/response contracts
+- URL normalisation and hashing (the cache key), SSRF rules for IPv4/IPv6
+- HTML metadata parsing, fallbacks, charset decoding, non-HTML metadata
+- AI output schema and tag normalisation
+- API contract parsing (query strings, ids, error codes), ETag matching, format helpers
 
-I/O-heavy code (`lib/ai.ts`, the route handlers) is intentionally kept thin
-and structured so the parsing/validation/orchestration logic it depends on
-*is* unit-testable, rather than mocking `fetch`/Prisma/Gemini end-to-end
-inside a time-boxed assessment. Given more time, I'd add integration tests
-against a test database (e.g. via `testcontainers`) and a mocked Gemini
-client for `lib/ai.ts`'s retry-on-bad-JSON path.
+The end-to-end flow (save → summary → filter → reload, duplicates, retry, regenerate, delete,
+PDF, 403 site) was verified manually against Supabase and Gemini. Next steps would be route
+integration tests against a disposable Postgres, and a mocked Gemini client for the retry
+paths.
 
 ## Deployment
 
-**Suggested stack:** Vercel (frontend + API routes, since they're the same
-Next.js app) + Supabase or Neon (managed Postgres).
+Recommended: **Vercel** (the Next.js app: UI plus API routes) and **Supabase** (Postgres).
 
-1. Push this repo to GitHub.
-2. Create a Postgres database (Supabase/Neon/Railway) and copy its connection
-   string.
-3. Run `npx prisma migrate deploy` once against that database (or let it run
-   as a Vercel build step — see `vercel.json`-free approach below), i.e. add
-   `"vercel-build": "prisma migrate deploy && next build"` as the Vercel
-   build command if you want migrations to run automatically on deploy.
-4. Import the repo into Vercel → set `DATABASE_URL`, `GEMINI_API_KEY`,
-   `GEMINI_MODEL` (optional), and `NEXT_PUBLIC_SITE_URL` (your Vercel URL)
-   as environment variables.
-5. Deploy. Vercel runs `npm install` → `postinstall` (`prisma generate`) →
-   `npm run build`.
+1. Push the repository to GitHub.
+2. In Supabase, copy the **Transaction pooler** URL (add `?pgbouncer=true`) and the
+   **Session pooler** URL.
+3. Import the repo in Vercel and set `DATABASE_URL`, `DIRECT_URL`, `GEMINI_API_KEY`,
+   `GEMINI_MODEL` (optional) and `NEXT_PUBLIC_SITE_URL` (the production URL).
+4. Set the build command to `prisma migrate deploy && next build` so migrations run on deploy.
+5. Deploy. The save and retry routes declare `maxDuration = 60`, because a page fetch plus
+   Gemini can take several seconds.
 
-Any Node host works the same way (Render, Railway, Fly.io) since this is a
-standard Next.js app — no Vercel-specific APIs are used.
+Any Node host (Render, Railway, Fly.io) works the same way; no Vercel-only APIs are used.
 
-## Architecture decisions / trade-offs
+## Trade-offs and next steps
 
-- **One Next.js app instead of a separate Express backend + separate SPA:**
-  the assessment explicitly allows "serverless functions... or similar" as
-  the backend. Next.js Route Handlers *are* the backend here — they're the
-  only code that touches Prisma/Gemini, live in their own `api/` tree, and
-  are testable/deployable independently of the UI components. This was
-  chosen over a separate Express service to avoid duplicating the
-  request/response types across two servers and two deploys for an app this
-  size; the trade-off is that frontend and backend deploy together rather
-  than independently, which matters less at this scale than the type-safety
-  win of one shared contract file.
-- **`<img>` instead of `next/image` for thumbnails:** `next/image` requires
-  an allowlist of remote domains at build time, but this app fetches
-  Open Graph images from whatever domain the user pastes a URL for. Rather
-  than disabling image optimization only where needed, `images.unoptimized`
-  is set globally and thumbnails use a plain `<img loading="lazy">` with an
-  `onError` fallback.
-- **In-memory response cache, not Redis:** see [Caching strategy](#caching-strategy).
-  If this needed to scale to multiple server instances with consistent
-  cache invalidation, the swap is: replace `lib/responseCache.ts`'s `Map`
-  with Redis (`GET`/`SETEX`) and replace `invalidateItemsCache()`'s local
-  `store.clear()` with a `DEL` by key pattern or a pub/sub invalidation
-  message — the call sites in `app/api/items/route.ts` and
-  `lib/enrichItem.ts` wouldn't need to change.
-- **AI failures don't lose the save:** if the Gemini call fails or returns
-  malformed JSON (after one retry), the item is still persisted with its
-  metadata and marked `PARTIAL`, with a "Retry" action in the UI. Losing a
-  user's saved link because a summarization call timed out felt like the
-  wrong failure mode for a "save this for later" app.
-
-## Possible next steps
-
-- Background/queued enrichment (e.g. a job queue) instead of enriching
-  synchronously inside the `POST` request, so saving feels instant even for
-  slow pages, with the row starting in `PENDING` and updating via polling or
-  a websocket/SSE push.
-- Pagination/infinite scroll once a user's list grows past a page or two.
-- Multi-user auth (currently single-tenant, matching the "I am a User"
-  acceptance criteria as written).
-- Rate limiting on `POST /api/items` to bound Gemini spend per IP/user.
+- **One Next.js app rather than a separate API service:** Route Handlers are the backend
+  and the only code that touches Prisma or Gemini. One deploy and one shared contract file
+  outweigh independent scaling at this size.
+- **Enrichment runs synchronously in the request** (about 3–8s), with a staged skeleton card
+  in the UI. Next step: a queue that creates the row as `PENDING`, with polling or SSE for
+  instant saves.
+- **`<img>` instead of `next/image`:** thumbnails come from arbitrary domains, so a
+  `remotePatterns` allowlist isn't possible.
+- **Single-tenant** as specified. Next steps: auth with per-user libraries, pagination beyond
+  500 items, and full-text search (`tsvector`) for relevance ranking.
