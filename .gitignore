@@ -16,3 +16,7 @@ prisma/dev.db
 *.sqlite3
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+.vercel
+.env*
+!.env.example
