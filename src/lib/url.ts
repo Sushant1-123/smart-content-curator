@@ -23,9 +23,18 @@ export function normalizeUrl(rawUrl: string): string {
     "utm_campaign",
     "utm_term",
     "utm_content",
+    "utm_id",
     "fbclid",
     "gclid",
+    "msclkid",
+    "yclid",
+    "igshid",
+    "mc_cid",
+    "mc_eid",
+    "_hsenc",
+    "_hsmi",
     "ref",
+    "ref_src",
   ];
   for (const param of trackingParams) {
     url.searchParams.delete(param);
@@ -54,77 +63,66 @@ export function isHttpUrl(value: string): boolean {
   }
 }
 
-/** Reject URLs that could target the local machine or cloud metadata services. */
+/**
+ * Rejects URLs that could target the local machine, a private network or a
+ * cloud metadata service. Hostnames are re-checked after DNS resolution in
+ * lib/metadata.ts, so this is the cheap first gate, not the only one.
+ */
 export function isSafeExternalUrl(value: string): boolean {
+  let url: URL;
   try {
-    const url = new URL(value);
-    if (!isHttpUrl(value) || url.username || url.password || !url.hostname) return false;
-
-    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-    if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "local") {
-      return false;
-    }
-
-    const numericAddress = isIP(hostname);
-    if (!numericAddress) return true;
-
-    if (numericAddress === 4) {
-      const octets = hostname.split(".").map(Number);
-      const first = octets[0] ?? -1;
-      const second = octets[1] ?? -1;
-      return isSafeIpAddress(hostname) && !(
-        first === 0 ||
-        first === 10 ||
-        first === 127 ||
-        (first === 169 && second === 254) ||
-        (first === 172 && second >= 16 && second <= 31) ||
-        (first === 192 && second === 168) ||
-        (first === 100 && second >= 64 && second <= 127)
-      );
-    }
-
-    const normalized = hostname.toLowerCase();
-    return !(
-      normalized === "::1" ||
-      normalized === "::" ||
-      normalized.startsWith("fc") ||
-      normalized.startsWith("fd") ||
-      normalized.startsWith("fe8") ||
-      normalized.startsWith("fe9") ||
-      normalized.startsWith("fea") ||
-      normalized.startsWith("feb") ||
-      normalized.startsWith("::ffff:10.") ||
-      normalized.startsWith("::ffff:127.") ||
-      normalized.startsWith("::ffff:192.168.") ||
-      normalized.startsWith("::ffff:169.254.")
-    );
+    url = new URL(value);
   } catch {
     return false;
   }
+  if (!isHttpUrl(value) || url.username || url.password || !url.hostname) return false;
+
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".internal") ||
+    (!hostname.includes(".") && isIP(hostname) === 0) // single-label intranet names
+  ) {
+    return false;
+  }
+
+  return isIP(hostname) === 0 || isSafeIpAddress(hostname);
 }
+
+/** True only for publicly routable IPv4/IPv6 addresses. */
 export function isSafeIpAddress(address: string): boolean {
   const normalized = address.toLowerCase().replace(/^\[|\]$/g, "");
-  const numericAddress = isIP(normalized);
-  if (numericAddress === 4) {
-    const octets = normalized.split(".").map(Number);
-    const first = octets[0] ?? -1;
-    const second = octets[1] ?? -1;
-    return !(
-      first === 0 ||
-      first === 10 ||
-      first === 127 ||
-      (first === 169 && second === 254) ||
-      (first === 172 && second >= 16 && second <= 31) ||
-      (first === 192 && second === 168) ||
-      (first === 100 && second >= 64 && second <= 127)
-    );
-  }
-  if (numericAddress !== 6) return false;
+  const version = isIP(normalized);
+
+  if (version === 4) return isPublicIpv4(normalized);
+  if (version !== 6) return false;
+
+  // IPv4-mapped IPv6 (::ffff:10.0.0.1) inherits the IPv4 verdict.
+  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped?.[1]) return isPublicIpv4(mapped[1]);
 
   return !(
     normalized === "::1" ||
     normalized === "::" ||
-    normalized.startsWith("::ffff:192.168.") ||
-    normalized.startsWith("::ffff:169.254.")
+    normalized.startsWith("::ffff:") || // hex-form mapped addresses
+    /^f[cd]/.test(normalized) || // fc00::/7 unique local
+    /^fe[89ab]/.test(normalized) // fe80::/10 link-local
   );
 }
+
+function isPublicIpv4(address: string): boolean {
+  const [a = -1, b = -1] = address.split(".").map(Number);
+  return !(
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    a >= 224 // multicast + reserved
+  );
+}
+

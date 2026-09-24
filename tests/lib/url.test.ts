@@ -13,6 +13,10 @@ describe("normalizeUrl", () => {
     expect(normalizeUrl("https://example.com/")).toBe("https://example.com/");
   });
 
+  it("strips click-id and newsletter tracking params", () => {
+    expect(normalizeUrl("https://example.com/a?gclid=1&mc_cid=2&page=3")).toBe("https://example.com/a?page=3");
+  });
+
   it("lowercases the hostname", () => {
     expect(normalizeUrl("https://Example.COM/Post")).toBe("https://example.com/Post");
   });
@@ -59,6 +63,17 @@ describe("SSRF protection", () => {
     expect(isSafeExternalUrl("http://192.168.1.10")).toBe(false);
     expect(isSafeExternalUrl("http://169.254.169.254/latest/meta-data")).toBe(false);
     expect(isSafeIpAddress("::1")).toBe(false);
+  });
+
+  it("rejects private IPv6 ranges, IPv4-mapped addresses and intranet names", () => {
+    expect(isSafeIpAddress("fd12:3456::1")).toBe(false);
+    expect(isSafeIpAddress("fe80::1")).toBe(false);
+    expect(isSafeIpAddress("::ffff:10.0.0.1")).toBe(false);
+    expect(isSafeExternalUrl("http://[::ffff:127.0.0.1]/")).toBe(false);
+    expect(isSafeExternalUrl("http://intranet/")).toBe(false);
+    expect(isSafeExternalUrl("http://printer.local/")).toBe(false);
+    expect(isSafeIpAddress("2606:4700::1111")).toBe(true);
+    expect(isSafeIpAddress("8.8.8.8")).toBe(true);
   });
 
   it("allows a public HTTP(S) destination", () => {

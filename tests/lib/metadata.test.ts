@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseHtmlMetadata } from "@/lib/metadata";
+import { decodeHtml, metadataFromUrl, parseHtmlMetadata } from "@/lib/metadata";
 
 describe("parseHtmlMetadata", () => {
   it("prefers Open Graph tags when present", () => {
@@ -72,5 +72,51 @@ describe("parseHtmlMetadata", () => {
     expect(result.content).toContain("implementation timeline");
     expect(result.content).not.toContain("Menu");
     expect(result.content).not.toContain("not part of summary");
+  });
+});
+
+describe("metadata fallbacks", () => {
+  it("falls back to <h1>, then the URL slug, when there is no <title>", () => {
+    expect(parseHtmlMetadata("<html><body><h1>Heading Title</h1></body></html>", "https://example.com/x").title).toBe(
+      "Heading Title",
+    );
+    expect(parseHtmlMetadata("<html></html>", "https://example.com/blog/my-first-post").title).toBe("My first post");
+  });
+
+  it("extracts the favicon, defaulting to /favicon.ico", () => {
+    const withIcon = parseHtmlMetadata(`<link rel="icon" href="/static/icon.png">`, "https://example.com/a");
+    expect(withIcon.faviconUrl).toBe("https://example.com/static/icon.png");
+    expect(parseHtmlMetadata("<html></html>", "https://www.example.com/a").faviconUrl).toBe(
+      "https://www.example.com/favicon.ico",
+    );
+  });
+
+  it("ignores non-http image URLs", () => {
+    const html = `<meta property="og:image" content="javascript:alert(1)">`;
+    expect(parseHtmlMetadata(html, "https://example.com").imageUrl).toBeNull();
+  });
+
+  it("derives metadata for non-HTML resources from the URL", () => {
+    expect(metadataFromUrl("https://www.example.com/papers/attention_is_all_you_need.pdf")).toEqual({
+      title: "Attention is all you need",
+      description: null,
+      imageUrl: null,
+      siteName: "example.com",
+      faviconUrl: "https://www.example.com/favicon.ico",
+      content: null,
+    });
+  });
+});
+
+describe("decodeHtml", () => {
+  it("honours the charset from the Content-Type header", () => {
+    const latin1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9]); // "café" in ISO-8859-1
+    expect(decodeHtml(latin1, "text/html; charset=iso-8859-1")).toBe("café");
+  });
+
+  it("falls back to a <meta charset> declaration, then UTF-8", () => {
+    const bytes = new Uint8Array([...new TextEncoder().encode("<meta charset=\"windows-1252\">"), 0xe9]);
+    expect(decodeHtml(bytes, "text/html")).toContain("é");
+    expect(decodeHtml(new TextEncoder().encode("naïve"), "text/html")).toBe("naïve");
   });
 });
